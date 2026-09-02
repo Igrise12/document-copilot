@@ -29,3 +29,11 @@ def test_ready_document_cannot_return_to_processing() -> None:
 
     with pytest.raises(ValueError, match="ready"):
         document.transition_to(DocumentStatus.PROCESSING)
+
+
+def test_failed_document_can_retry_processing() -> None:
+    document = SourceDocument(status=DocumentStatus.FAILED)
+
+    document.transition_to(DocumentStatus.PROCESSING)
+
+    assert document.status is DocumentStatus.PROCESSING

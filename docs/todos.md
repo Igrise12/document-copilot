@@ -6,6 +6,13 @@
 
 **First release boundary:** PDF and SEC HTML/text uploads; email login restricted to Driftwood addresses; no OCR, external data, investment recommendations, mobile app, or multi-tenancy.
 
+## Current status — 2026-09-02
+
+- Phases 1–2 are implemented. Backend unit tests and Ruff pass locally (11 tests).
+- Phase 6 is implemented: the React SPA has validated configuration, Supabase email auth, protected routes, and an authenticated API client.
+- The remaining Phase 0 account and deployment decisions cannot be verified from the repository. The migration is marked applied below; confirm it targets the intended development Supabase project before building on it.
+- The frontend production build and TypeScript check pass using the installed project binaries. `pnpm` is not installed globally, so run the documented pnpm checks once it is available.
+
 ## Phase 0 — Decisions and accounts
 
 - [ ] Create the Supabase project and record its URL, anon key, service-role key, direct database URL, and Storage region in the password manager.
@@ -17,25 +24,27 @@
 
 ## Phase 1 — Backend foundation
 
-- [ ] From `backend/`, initialize the FastAPI project with the declared dependencies only: FastAPI, Pydantic settings, SQLAlchemy/Alembic, Supabase, OpenAI, pgvector, HTTPX, Structlog, Pytest, and Ruff.
-- [ ] Create `app/config.py` as the only environment reader. Validate Supabase URL/keys, direct database URL, OpenAI key, allowed email domain, frontend origin, upload limits, and model names at startup.
-- [ ] Add `app/main.py` with a health endpoint, CORS for the frontend origin, structured request logging, and startup validation.
-- [ ] Add `GET /health` and verify it locally with `curl`.
-- [ ] Configure Ruff and Pytest; ensure `uv run ruff check .` and `uv run pytest -m "not integration"` pass without network access.
-- [ ] Initialize Alembic and make it read metadata and the direct/session database URL from `app.config.settings`.
+- [x] From `backend/`, initialize the FastAPI project with the declared dependencies only: FastAPI, Pydantic settings, SQLAlchemy/Alembic, Supabase, OpenAI, pgvector, HTTPX, Structlog, Pytest, and Ruff.
+- [x] Create `app/config.py` as the only environment reader. Validate Supabase URL/keys, direct database URL, OpenAI key, allowed email domain, frontend origin, upload limits, and model names at startup.
+- [x] Add `app/main.py` with a health endpoint, CORS for the frontend origin, structured request logging, and startup validation.
+- [x] Add `GET /health` and verify it locally with `curl`.
+- [x] Configure Ruff and Pytest; ensure `uv run ruff check .` and `uv run pytest -m "not integration"` pass without network access.
+- [x] Initialize Alembic and make it read metadata and the direct/session database URL from `app.config.settings`.
 
 ## Phase 2 — Database, Storage, and authorization
 
-- [ ] Model `users`, `source_documents`, `document_chunks`, `chat_threads`, `chat_messages`, and `message_citations` in SQLAlchemy.
-- [ ] Give `source_documents` an owner, original filename, storage path, source type, filing metadata, processing status (`uploaded`, `processing`, `ready`, `failed`), failure detail, and timestamps.
-- [ ] Give `document_chunks` a document ID, position, text, page/section/source-offset metadata, token count, vector embedding, and generated full-text vector.
-- [ ] Create the first reviewed Alembic migration. It must enable `vector`, create normal tables, vector/full-text indexes, private Storage bucket metadata, RLS, and owner-scoped policies.
-- [ ] Apply the migration to the development Supabase project with `uv run alembic upgrade head`.
-- [ ] Create the private `documents` Storage bucket through migration or one documented setup step; browsers must never receive the service-role key.
-- [ ] Implement FastAPI current-user dependency: validate the Supabase bearer token and reject missing, invalid, or non-Driftwood email accounts.
-- [ ] Add unit tests for the email-domain authorization rule and document-status transitions.
+- [x] Model `users`, `source_documents`, `document_chunks`, `chat_threads`, `chat_messages`, and `message_citations` in SQLAlchemy.
+- [x] Give `source_documents` an owner, original filename, storage path, source type, filing metadata, processing status (`uploaded`, `processing`, `ready`, `failed`), failure detail, and timestamps.
+- [x] Give `document_chunks` a document ID, position, text, page/section/source-offset metadata, token count, vector embedding, and generated full-text vector.
+- [x] Create the first reviewed Alembic migration. It must enable `vector`, create normal tables, vector/full-text indexes, private Storage bucket metadata, RLS, and owner-scoped policies.
+- [x] Apply the migration to the development Supabase project with `uv run alembic upgrade head`.
+- [x] Create the private `documents` Storage bucket through migration or one documented setup step; browsers must never receive the service-role key.
+- [x] Implement FastAPI current-user dependency: validate the Supabase bearer token and reject missing, invalid, or non-Driftwood email accounts.
+- [x] Add unit tests for the email-domain authorization rule and document-status transitions.
 
 ## Phase 3 — Upload and ingestion vertical slice
+
+### Backend
 
 - [ ] Add `POST /documents` to accept an authenticated upload, validate file size/type at the HTTP boundary, store the original privately, create the document record, and return its status.
 - [ ] Add `GET /documents` and `GET /documents/{id}`; scope both to the requesting analyst.
@@ -46,6 +55,13 @@
 - [ ] Mark failures `failed` with a safe user-facing explanation and a logged technical cause; never leave a document indefinitely `processing`.
 - [ ] Add `POST /documents/{id}/retry` for a document owner and `DELETE /documents/{id}` to remove the Storage object, chunks, and metadata together.
 - [ ] Add focused tests for file validation, extraction metadata, chunk boundaries, and status/error handling. Run one integration check using a real small filing.
+
+### Frontend
+
+- [ ] Add a protected document page with an upload control, accepted-file guidance, file-size validation, and upload progress.
+- [ ] Show the authenticated analyst's documents with `uploaded`, `processing`, `ready`, and `failed` states.
+- [ ] Poll while a document is processing; stop on `ready`, `failed`, navigation away, or unmount.
+- [ ] Add retry and delete controls, including an accessible confirmation before deletion.
 - [ ] Manual acceptance check: sign in, upload one filing, refresh the page, and see it progress to `ready` without exposing privileged credentials.
 
 ## Phase 4 — Retrieval and grounding
@@ -71,17 +87,15 @@
 
 ## Phase 6 — Frontend foundation and authentication
 
-- [ ] Initialize the Vite React TypeScript application in `frontend/`; keep it a SPA.
-- [ ] Configure Tailwind and shadcn/ui. Use shadcn primitives rather than custom replacements.
-- [ ] Add `src/lib/env.ts` as the only client environment reader and `src/lib/supabase.ts` for the browser client.
-- [ ] Add `src/lib/http.ts` and `src/lib/api.ts` around native `fetch`; automatically attach the current bearer token and show typed network/API errors.
-- [ ] Add login, sign-up, sign-out, session restoration, and protected routes. Surface a helpful message for disallowed email domains.
+- [x] Initialize the Vite React TypeScript application in `frontend/`; keep it a SPA.
+- [x] Configure Tailwind and shadcn/ui. Use shadcn primitives rather than custom replacements.
+- [x] Add `src/lib/env.ts` as the only client environment reader and `src/lib/supabase.ts` for the browser client.
+- [x] Add `src/lib/http.ts` and `src/lib/api.ts` around native `fetch`; automatically attach the current bearer token and show typed network/API errors.
+- [x] Add login, sign-up, sign-out, session restoration, and protected routes. Surface a helpful message for disallowed email domains; keep it email-only (no SSO).
 - [ ] Check `pnpm tsc --noEmit` and `pnpm lint`.
 
 ## Phase 7 — Upload and document UI
 
-- [ ] Build an accessible document page with upload control, accepted-file guidance, file-size error, upload progress, processing/ready/failed status, retry, and delete.
-- [ ] Poll document status while processing; stop polling on `ready`, `failed`, navigation away, or unmount.
 - [ ] Make ready documents discoverable by name, company, filing type, fiscal year, and upload date.
 - [ ] Provide an empty state that explains the first action: upload a filing before asking questions about it.
 - [ ] Manually verify desktop and narrow-browser layouts, keyboard upload, and error messages.
@@ -116,10 +130,12 @@
 - [ ] Measure whether each pilot analyst saves at least three hours per week. Fix trust failures before adding features.
 - [ ] Roll out to the wider firm only after the pilot meets the definition of done.
 
-## Recommended first work session
+## Recommended next work session
 
-- [ ] Complete Phase 0 except Railway deployment.
-- [ ] Complete Phase 1 and apply the Phase 2 migration.
-- [ ] Build only the Phase 3 upload flow for one PDF.
-- [ ] Build only enough of Phases 4–5 to answer one question with one valid citation.
-- [ ] Build the smallest Phase 6–8 UI needed to demonstrate that end-to-end path.
+1. Close the external prerequisites: finish the remaining Phase 0 account/settings tasks, decide upload limits and deletion ownership, and record those limits in `README.md`.
+2. Confirm the development migration and fix frontend toolchain hygiene: install pnpm, remove the accidental `package-lock.json`, then run `pnpm tsc --noEmit` and `pnpm lint`.
+3. Build the Phase 3 backend for a single PDF upload: implement the authenticated upload endpoint, private Storage write, document status record, and background extraction/chunking. Prove it with one small filing before adding retry/delete or SEC HTML support.
+4. Build the Phase 3 frontend needed to exercise that slice: a protected document upload/status page that polls processing state. Do not build chat UI yet.
+5. Once one document reaches `ready`, implement retrieval and one grounded, cited answer before expanding chat persistence, document browsing, or deployment work.
+
+**Recommendation:** Keep the scope to the PDF upload → ready → one cited answer journey. It is the fastest way to validate the product's trust-critical path; everything else can follow evidence from that working slice.

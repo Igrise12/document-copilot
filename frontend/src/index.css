@@ -1,0 +1,34 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+
+:root {
+  --background: oklch(0.98 0.006 85); --foreground: oklch(0.2 0.02 260); --card: oklch(1 0 0); --card-foreground: oklch(0.2 0.02 260); --primary: oklch(0.26 0.055 255); --primary-foreground: oklch(0.99 0 0); --muted: oklch(0.94 0.012 85); --muted-foreground: oklch(0.47 0.025 255); --border: oklch(0.86 0.012 85); --input: oklch(0.86 0.012 85); --ring: oklch(0.5 0.11 250); --destructive: oklch(0.55 0.2 25); --radius: 0.75rem;
+  font-family: 'Geist Variable', sans-serif; color: var(--foreground); background: var(--background); font-synthesis: none; text-rendering: optimizeLegibility;
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, input { font: inherit; }
+button { cursor: pointer; }
+.auth-shell, .workspace-shell, .loading-screen { min-height: 100vh; }
+.auth-shell { display: grid; place-items: center; padding: 1.5rem; }
+.auth-panel { width: min(100%, 27rem); padding: 2.5rem; background: var(--card); border-radius: 1rem; box-shadow: 0 20px 50px rgb(26 33 53 / 0.12); }
+.wordmark { margin: 0 0 3rem; color: var(--primary); font-size: 0.8rem; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; }
+h1 { margin: 0; font-size: clamp(2rem, 6vw, 3.1rem); line-height: 1; letter-spacing: -0.04em; }
+.auth-intro { margin: 1rem 0 2.25rem; color: var(--muted-foreground); line-height: 1.55; }
+.auth-form { display: grid; gap: 0.55rem; }
+.auth-form label { margin-top: 0.65rem; font-size: 0.9rem; font-weight: 600; }
+.auth-form input { width: 100%; border: 1px solid var(--input); border-radius: 0.5rem; background: white; padding: 0.7rem 0.8rem; outline: none; }
+.auth-form input:focus { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 20%, transparent); }
+.auth-submit { width: 100%; margin-top: 1.25rem; }
+.form-error { margin: 0.5rem 0 0; color: var(--destructive); font-size: 0.9rem; line-height: 1.4; }
+.auth-switch { width: 100%; margin-top: 1.2rem; border: 0; background: transparent; color: var(--primary); font-size: 0.9rem; text-decoration: underline; text-underline-offset: 0.2rem; }
+.workspace-shell { max-width: 72rem; margin: 0 auto; padding: 1.5rem; }
+.workspace-header { display: flex; align-items: center; justify-content: space-between; }
+.workspace-header .wordmark { margin: 0; }
+.workspace-copy { max-width: 42rem; margin-top: 9rem; }
+.workspace-copy > p:first-child { color: var(--muted-foreground); font-size: 0.9rem; }
+.workspace-copy > p:last-child { margin-top: 1rem; color: var(--muted-foreground); line-height: 1.6; }
+.loading-screen { display: grid; place-items: center; color: var(--muted-foreground); }
+@media (max-width: 480px) { .auth-panel { padding: 1.75rem; } .workspace-copy { margin-top: 6rem; } }
