@@ -26,7 +26,7 @@
 
 ## Phase 2 — Database, Storage, and authorization
 
-- [ ] Model `profiles`, `source_documents`, `document_chunks`, `chat_threads`, `chat_messages`, and `message_citations` in SQLAlchemy.
+- [ ] Model `users`, `source_documents`, `document_chunks`, `chat_threads`, `chat_messages`, and `message_citations` in SQLAlchemy.
 - [ ] Give `source_documents` an owner, original filename, storage path, source type, filing metadata, processing status (`uploaded`, `processing`, `ready`, `failed`), failure detail, and timestamps.
 - [ ] Give `document_chunks` a document ID, position, text, page/section/source-offset metadata, token count, vector embedding, and generated full-text vector.
 - [ ] Create the first reviewed Alembic migration. It must enable `vector`, create normal tables, vector/full-text indexes, private Storage bucket metadata, RLS, and owner-scoped policies.

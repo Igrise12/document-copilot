@@ -8,7 +8,7 @@ retrieval, or chat routes.
 
 ## Source of truth
 
-`backend/app/database/models.py` contains the SQLAlchemy models for normal
+`backend/app/database/` contains one SQLAlchemy model per file for normal
 tables, constraints, and ordinary indexes. Alembic migrations are the only
 way to change the Supabase schema. `alembic/env.py` imports that metadata and
 uses `app.config.settings.database_url`; it must never use the transaction
@@ -19,9 +19,9 @@ pooler URL.
 Every product table uses a UUID primary key and timezone-aware `created_at`
 and `updated_at` timestamps unless noted otherwise.
 
-### Profiles
+### Users
 
-`profiles` has one row per Supabase user. Its `id` is the UUID from
+`users` has one row per Supabase user. Its `id` is the UUID from
 `auth.users.id`, and it stores the user's email plus timestamps. Product
 tables refer to this ID as their owner.
 
@@ -38,7 +38,7 @@ tables refer to this ID as their owner.
   `failure_detail`
 - timestamps
 
-It has an owner/timestamp index for document listings. Deleting a profile
+It has an owner/timestamp index for document listings. Deleting a user
 cascades to its documents.
 
 ### Document chunks
@@ -56,7 +56,7 @@ a document cascades to its chunks.
 `chat_threads` has an owner, title, and timestamps. `chat_messages` has its
 thread ID, a stable position unique within that thread, a `user` or `assistant`
 role, message content, optional AI SDK-compatible JSON payload, and a
-timestamp. Deleting a profile deletes its threads, and deleting a thread
+timestamp. Deleting a user deletes its threads, and deleting a thread
 deletes its messages.
 
 ### Message citations
