@@ -8,7 +8,7 @@
 
 ## Current status — 2026-09-03
 
-- Phases 1–3 (PDF slice) are implemented. Phase 4 retrieval/grounding is implemented and its guarded 768d migration has been applied to the development Supabase project. Backend unit tests and Ruff pass locally (46 tests).
+- Phases 1–5 are implemented. Phase 4 retrieval/grounding is implemented and its guarded 768d migration has been applied to the development Supabase project. Backend unit tests and Ruff pass locally (58 tests).
 - The local Ollama Podman endpoint has `embeddinggemma:latest`; the one-chunk AAPL pilot stored a 768d vector with section metadata and remains `uploaded`, so it is correctly excluded from retrieval. Full-corpus ingestion and manual evaluation remain pending.
 - Phase 6 is implemented: the React SPA has validated configuration, Supabase email auth, protected routes, and an authenticated API client.
 - The protected document page supports 50 MiB PDF uploads, real upload progress, document-status polling, retry, and owner-only deletion. The live Supabase acceptance journey is still pending.
@@ -83,12 +83,12 @@
 
 ## Phase 5 — Chat API and persistence
 
-- [ ] Add thread endpoints: create, list, rename, load messages, and delete. Every query must be owner-scoped.
-- [ ] Add a streaming chat endpoint that authenticates, saves the user message, retrieves evidence, generates the answer, validates citations, streams text/status, then saves the assistant message and citation rows.
-- [ ] Keep the Ollama prompt narrow: use retrieved material only, cite every factual claim, disclose insufficient evidence, and never give a stock recommendation.
-- [ ] Persist enough usage/request metadata to investigate failures without storing secrets or access tokens.
-- [ ] Make cancellation safe: a cancelled stream must not create a falsely completed assistant answer.
-- [ ] Add API tests for unauthorized access, thread ownership, persisted citations, insufficient evidence, and streaming error paths.
+- [x] Add thread endpoints: create, list, rename, load messages, and delete. Every query must be owner-scoped.
+- [x] Add a streaming chat endpoint that authenticates, saves the user message, retrieves evidence, generates the answer, validates citations, streams text/status, then saves the assistant message and citation rows.
+- [x] Keep the Ollama prompt narrow: use retrieved material only, cite every factual claim, disclose insufficient evidence, and never give a stock recommendation.
+- [x] Persist enough usage/request metadata to investigate failures without storing secrets or access tokens.
+- [x] Make cancellation safe: a cancelled stream must not create a falsely completed assistant answer.
+- [x] Add API tests for unauthorized access, thread ownership, persisted citations, insufficient evidence, and streaming error paths.
 
 ## Phase 6 — Frontend foundation and authentication
 
@@ -107,11 +107,11 @@
 
 ## Phase 8 — Chat and citation UI
 
-- [ ] Build a chat route with a thread sidebar, new-thread action, stored conversation loading, composer, streaming answer state, cancellation, and retry.
-- [ ] Let the user scope a question to all ready documents or selected documents; make the scope visible beside the answer.
-- [ ] Render citations next to answer claims with filing name, date/type, and page or section.
-- [ ] Open a source-passage panel from a citation. Show the underlying text and a time-limited signed link to the original file when available.
-- [ ] Clearly distinguish a grounded refusal/insufficient-evidence result from a network or server failure.
+- [x] Build a chat route with a thread sidebar, new-thread action, stored conversation loading, composer, streaming answer state, cancellation, and retry.
+- [x] Let the user scope a question to all ready documents or selected documents; make the scope visible beside the answer.
+- [x] Render citations next to answer claims with filing name, date/type, and page or section.
+- [x] Open a source-passage panel from a citation. Show the underlying text and a time-limited signed link to the original file when available.
+- [x] Clearly distinguish a grounded refusal/insufficient-evidence result from a network or server failure.
 - [ ] Manually verify a full journey: login → upload → ready → ask → inspect passage → reload conversation.
 
 ## Phase 9 — Security, reliability, and quality

@@ -49,7 +49,7 @@ uv run alembic upgrade head
 cd backend
 uv sync
 uv run alembic upgrade head
-uv run uvicorn app.main:app --reload
+uv run uvicorn app.main:app --reload --port 8001
 ```
 
 ## Imports (`from app...`)
@@ -62,7 +62,7 @@ Preferred API server command:
 
 ```bash
 cd backend
-uv run uvicorn app.main:app --reload
+uv run uvicorn app.main:app --reload --port 8001
 ```
 
 Direct file execution also works:

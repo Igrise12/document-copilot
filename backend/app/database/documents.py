@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -10,10 +10,16 @@ from app.ingestion.chunking import TextChunk
 from app.supabase import async_service_role_client
 
 BUCKET = "documents"
-PUBLIC_COLUMNS = "id,original_filename,source_type,status,failure_detail,created_at,updated_at"
+PUBLIC_COLUMNS = "id,owner_id,original_filename,source_type,filing_type,filing_date,status,failure_detail,created_at,updated_at"
 
 
-async def create_document(user: CurrentUser, filename: str, content: bytes) -> dict[str, Any]:
+async def create_document(
+    user: CurrentUser,
+    filename: str,
+    content: bytes,
+    filing_type: str | None = None,
+    filing_date: date | None = None,
+) -> dict[str, Any]:
     client = await async_service_role_client()
     await client.table("users").upsert(
         {"id": str(user.id), "email": user.email},
@@ -34,6 +40,8 @@ async def create_document(user: CurrentUser, filename: str, content: bytes) -> d
                 "original_filename": filename,
                 "storage_path": storage_path,
                 "source_type": "pdf",
+                "filing_type": filing_type,
+                "filing_date": filing_date.isoformat() if filing_date else None,
                 "status": "uploaded",
             }
         ).execute()
@@ -48,7 +56,7 @@ async def list_documents(owner_id: UUID) -> list[dict[str, Any]]:
     response = await (
         client.table("source_documents")
         .select(PUBLIC_COLUMNS)
-        .eq("owner_id", str(owner_id))
+        .or_(f"status.eq.ready,owner_id.eq.{owner_id}")
         .order("created_at", desc=True)
         .execute()
     )
@@ -135,6 +143,24 @@ async def begin_processing(owner_id: UUID, document_id: UUID) -> dict[str, Any]:
 async def download_document(storage_path: str) -> bytes:
     client = await async_service_role_client()
     return await client.storage.from_(BUCKET).download(storage_path)
+
+
+async def signed_document_url(document_id: UUID, expires_in: int) -> str | None:
+    client = await async_service_role_client()
+    response = await (
+        client.table("source_documents")
+        .select("storage_path")
+        .eq("id", str(document_id))
+        .eq("status", "ready")
+        .maybe_single()
+        .execute()
+    )
+    if not response.data:
+        return None
+    signed = await client.storage.from_(BUCKET).create_signed_url(
+        response.data["storage_path"], expires_in
+    )
+    return signed["signedURL"]
 
 
 async def store_document_content(

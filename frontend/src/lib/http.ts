@@ -13,6 +13,8 @@ export class ApiError extends Error {
   }
 }
 
+export type StreamEvent = { event: string; data: unknown }
+
 function errorMessage(body: unknown): string {
   const detail = typeof body === 'object' && body && 'detail' in body ? body.detail : null
   return typeof detail === 'string' ? detail : 'Request failed. Please try again.'
@@ -51,6 +53,7 @@ export async function upload<T>(
   file: File,
   onProgress: (percent: number) => void,
   signal?: AbortSignal,
+  fields: Record<string, string> = {},
 ): Promise<T> {
   const token = await getAccessToken()
   if (signal?.aborted) throw new ApiError('Upload cancelled.')
@@ -96,6 +99,59 @@ export async function upload<T>(
 
     const body = new FormData()
     body.append('file', file)
+    for (const [name, value] of Object.entries(fields)) if (value) body.append(name, value)
     xhr.send(body)
   })
+}
+
+export async function stream(
+  path: string,
+  body: unknown,
+  onEvent: (event: StreamEvent) => void | Promise<void>,
+  signal: AbortSignal,
+): Promise<void> {
+  const token = await getAccessToken()
+  let response: Response
+  try {
+    response = await fetch(`${env.apiBaseUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        Accept: 'text/event-stream',
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+      signal,
+    })
+  } catch {
+    throw new ApiError('Unable to reach Document Copilot. Check your connection and try again.')
+  }
+
+  if (!response.ok) {
+    const errorBody: unknown = await response.json().catch(() => null)
+    throw new ApiError(errorMessage(errorBody), response.status)
+  }
+  if (!response.body) throw new ApiError('Document Copilot returned an empty answer stream.', response.status)
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    buffer += decoder.decode(value, { stream: !done })
+    let separator = buffer.search(/\r?\n\r?\n/)
+    while (separator >= 0) {
+      const block = buffer.slice(0, separator)
+      buffer = buffer.slice(separator).replace(/^\r?\n\r?\n/, '')
+      const lines = block.split(/\r?\n/)
+      const event = lines.find((line) => line.startsWith('event: '))?.slice(7) ?? 'message'
+      const data = lines
+        .filter((line) => line.startsWith('data: '))
+        .map((line) => line.slice(6))
+        .join('\n')
+      if (data) await onEvent({ event, data: JSON.parse(data) as unknown })
+      separator = buffer.search(/\r?\n\r?\n/)
+    }
+    if (done) return
+  }
 }

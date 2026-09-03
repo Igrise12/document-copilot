@@ -1,7 +1,7 @@
 import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { Session } from '@supabase/supabase-js'
-import { FileText, LogOut, RotateCcw, Trash2, Upload } from 'lucide-react'
+import { FileText, MessageSquare, LogOut, RotateCcw, Trash2, Upload } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
@@ -14,11 +14,14 @@ type DocumentStatus = 'uploaded' | 'processing' | 'ready' | 'failed'
 type DocumentSummary = {
   id: string
   original_filename: string
-  source_type: 'pdf'
+  source_type: string
+  filing_type?: string | null
+  filing_date?: string | null
   status: DocumentStatus
   failure_detail: string | null
   created_at: string
   updated_at: string
+  can_manage: boolean
 }
 
 type DocumentsPageProps = { session: Session }
@@ -51,6 +54,8 @@ export function DocumentsPage({ session }: DocumentsPageProps) {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [filingType, setFilingType] = useState('')
+  const [filingDate, setFilingDate] = useState('')
   const [fileError, setFileError] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
@@ -146,9 +151,12 @@ export function DocumentsPage({ session }: DocumentsPageProps) {
         selectedFile,
         setUploadProgress,
         controller.signal,
+        { filing_type: filingType, filing_date: filingDate },
       )
       replaceDocuments([document, ...documentsRef.current.filter(({ id }) => id !== document.id)])
       setSelectedFile(null)
+      setFilingType('')
+      setFilingDate('')
       if (fileInputRef.current) fileInputRef.current.value = ''
       setAnnouncement(`${document.original_filename} uploaded and queued for processing.`)
     } catch (caughtError) {
@@ -200,6 +208,7 @@ export function DocumentsPage({ session }: DocumentsPageProps) {
         <p className="m-0 text-xs font-semibold uppercase tracking-[0.08em] text-primary">Driftwood Capital</p>
         <div className="flex items-center gap-3">
           <span className="hidden text-sm text-muted-foreground sm:inline">{session.user.email}</span>
+          <Button onClick={() => navigate('/chat')} variant="outline"><MessageSquare />Ask questions</Button>
           <Button onClick={signOut} variant="outline"><LogOut />Sign out</Button>
         </div>
       </header>
@@ -207,14 +216,14 @@ export function DocumentsPage({ session }: DocumentsPageProps) {
       <section className="mt-14 max-w-3xl" aria-labelledby="documents-title">
         <h1 id="documents-title">Documents</h1>
         <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground">
-          Upload and monitor the filings available to your research workspace.
+          The shared research corpus is ready for chat. Upload a PDF only when you need to add a filing.
         </p>
       </section>
 
       <form className="mt-10 rounded-xl bg-card p-5 shadow-[0_14px_38px_rgb(26_33_53_/_0.09)] sm:p-7" onSubmit={submitUpload}>
         <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
           <div className="min-w-0 flex-1">
-            <label className="block text-sm font-semibold" htmlFor="filing">Upload a filing</label>
+            <label className="block text-sm font-semibold" htmlFor="filing">Upload a filing <span className="font-normal text-muted-foreground">optional</span></label>
             <p className="mt-1 text-sm leading-6 text-muted-foreground" id="filing-guidance">PDF only · Maximum {maxUploadMegabytes} MiB</p>
             <input
               ref={fileInputRef}
@@ -226,6 +235,14 @@ export function DocumentsPage({ session }: DocumentsPageProps) {
               disabled={isUploading}
               onChange={chooseFile}
             />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 md:w-[19rem]">
+            <label className="text-sm font-semibold" htmlFor="filing-type">Filing type <span className="font-normal text-muted-foreground">optional</span>
+              <input className="mt-1.5 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm" disabled={isUploading} id="filing-type" onChange={(event) => setFilingType(event.target.value)} placeholder="10-K" value={filingType} />
+            </label>
+            <label className="text-sm font-semibold" htmlFor="filing-date">Filing date <span className="font-normal text-muted-foreground">optional</span>
+              <input className="mt-1.5 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm" disabled={isUploading} id="filing-date" onChange={(event) => setFilingDate(event.target.value)} type="date" value={filingDate} />
+            </label>
           </div>
           <Button className="h-10 px-4 md:self-end" disabled={!selectedFile || Boolean(fileError) || isUploading} type="submit">
             <Upload />{isUploading ? 'Uploading…' : 'Upload PDF'}
@@ -244,8 +261,8 @@ export function DocumentsPage({ session }: DocumentsPageProps) {
       <section className="mt-14" aria-labelledby="your-documents-title">
         <div className="flex items-end justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-semibold tracking-[-0.025em]" id="your-documents-title">Your documents</h2>
-            <p className="mt-2 text-sm text-muted-foreground">Newest uploads appear first.</p>
+            <h2 className="text-2xl font-semibold tracking-[-0.025em]" id="your-documents-title">Research corpus</h2>
+            <p className="mt-2 text-sm text-muted-foreground">Ready filings are available to every Driftwood analyst.</p>
           </div>
           {!isLoading && loadError && <Button onClick={() => { setLoadError(null); void loadDocuments() }} variant="outline">Try again</Button>}
         </div>
@@ -253,15 +270,15 @@ export function DocumentsPage({ session }: DocumentsPageProps) {
         {loadError && <p className="mt-5 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-900" role="alert">{loadError}</p>}
         {actionError && <p className="mt-5 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-900" role="alert">{actionError}</p>}
         {isLoading ? (
-          <p className="mt-8 text-sm text-muted-foreground">Loading your documents…</p>
+          <p className="mt-8 text-sm text-muted-foreground">Loading the research corpus…</p>
         ) : documents.length === 0 ? (
           <div className="mt-8 border-y border-border py-12 text-center">
             <FileText className="mx-auto size-7 text-muted-foreground" aria-hidden="true" />
-            <p className="mt-4 font-medium">No filings yet</p>
-            <p className="mt-2 text-sm text-muted-foreground">Upload your first PDF to begin processing it.</p>
+            <p className="mt-4 font-medium">No ready filings yet</p>
+            <p className="mt-2 text-sm text-muted-foreground">The corpus is still being prepared. You can optionally upload a PDF.</p>
           </div>
         ) : (
-          <ul className="mt-8 divide-y divide-border border-y border-border" aria-label="Uploaded documents">
+          <ul className="mt-8 divide-y divide-border border-y border-border" aria-label="Research corpus documents">
             {documents.map((document) => {
               const isActing = actingDocumentId === document.id
               return (
@@ -274,6 +291,8 @@ export function DocumentsPage({ session }: DocumentsPageProps) {
                     <div className="mt-2 flex flex-wrap items-center gap-2 pl-8 text-sm text-muted-foreground">
                       <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${statusStyles[document.status]}`}>{document.status}</span>
                       <span>Uploaded {dateFormatter.format(new Date(document.created_at))}</span>
+                      {document.filing_type && <span>{document.filing_type}</span>}
+                      {document.filing_date && <span>{dateFormatter.format(new Date(document.filing_date))}</span>}
                     </div>
                     {document.status === 'failed' && document.failure_detail && (
                       <p className="mt-3 pl-8 text-sm text-red-800">{document.failure_detail}</p>
@@ -285,14 +304,14 @@ export function DocumentsPage({ session }: DocumentsPageProps) {
                     </span>
                   )}
                   <div className="flex items-center gap-2 md:justify-end">
-                    {document.status === 'failed' && (
+                    {document.can_manage && document.status === 'failed' && (
                       <Button disabled={actingDocumentId !== null} onClick={() => void retryDocument(document)} variant="outline">
                         <RotateCcw />{isActing ? 'Retrying…' : 'Retry'}
                       </Button>
                     )}
-                    <Button disabled={actingDocumentId !== null} onClick={() => void deleteDocument(document)} variant="destructive">
+                    {document.can_manage && <Button disabled={actingDocumentId !== null} onClick={() => void deleteDocument(document)} variant="destructive">
                       <Trash2 />{isActing ? 'Working…' : 'Delete'}
-                    </Button>
+                    </Button>}
                   </div>
                 </li>
               )

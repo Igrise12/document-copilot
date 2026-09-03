@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     ingestion_chunk_max_bytes: int = 512
     ollama_embedding_batch_size: int = 16
     ollama_timeout_seconds: float = 120
+    chat_history_message_limit: int = 12
+    chat_max_output_tokens: int = 2048
+    signed_url_ttl_seconds: int = 600
     retrieval_semantic_candidate_limit: int = 20
     retrieval_lexical_candidate_limit: int = 20
     retrieval_result_limit: int = 8
@@ -66,6 +69,9 @@ class Settings(BaseSettings):
         "ingestion_chunk_max_bytes",
         "ollama_embedding_batch_size",
         "ollama_timeout_seconds",
+        "chat_history_message_limit",
+        "chat_max_output_tokens",
+        "signed_url_ttl_seconds",
         "retrieval_semantic_candidate_limit",
         "retrieval_lexical_candidate_limit",
         "retrieval_result_limit",

@@ -13,7 +13,7 @@ export function LoginPage({ session }: LoginPageProps) {
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  if (session) return <Navigate replace to="/documents" />
+  if (session) return <Navigate replace to="/chat" />
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()

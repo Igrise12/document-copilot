@@ -1,3 +1,4 @@
+import re
 from collections.abc import Sequence
 from uuid import UUID
 
@@ -13,11 +14,39 @@ from app.ingestion.embeddings import embed_texts, query_embedding_input
 _SCOPE = """
     FROM document_chunks c
     JOIN source_documents d ON d.id = c.document_id
-    WHERE d.owner_id = %(owner_id)s
-      AND d.status = 'ready'
+    WHERE d.status = 'ready'
       AND c.embedding IS NOT NULL
       AND (%(document_ids)s::uuid[] IS NULL OR c.document_id = ANY(%(document_ids)s))
 """
+
+_LEXICAL_VECTOR = """
+    c.search_vector || to_tsvector(
+        'english',
+        concat_ws(
+            ' ', d.company_name, d.ticker, 'fiscal year', d.fiscal_year::text,
+            d.filing_type, d.original_filename
+        )
+    )
+"""
+
+
+def _lexical_query_variants(question: str) -> tuple[str, ...]:
+    if re.search(r"\brevenue\b", question, flags=re.IGNORECASE):
+        alternate = re.sub(
+            r"\brevenue\b", '"net sales"', question, flags=re.IGNORECASE
+        )
+        return question, alternate
+    if re.search(r"\btotal\s+net\s+sales\b", question, flags=re.IGNORECASE):
+        alternate = re.sub(
+            r"\btotal\s+net\s+sales\b", '"total revenue"', question, flags=re.IGNORECASE
+        )
+        return question, alternate
+    if re.search(r"\bnet\s+sales\b", question, flags=re.IGNORECASE):
+        alternate = re.sub(
+            r"\bnet\s+sales\b", '"total revenue"', question, flags=re.IGNORECASE
+        )
+        return question, alternate
+    return (question,)
 
 
 def reciprocal_rank_fusion(
@@ -46,13 +75,18 @@ def _passage(row: dict) -> SourcePassage:
         text=row["text"],
         page_numbers=page_numbers,
         section=row["section"],
+        company_name=row.get("company_name"),
+        ticker=row.get("ticker"),
+        filing_type=row.get("filing_type"),
+        filing_date=row.get("filing_date"),
+        fiscal_year=row.get("fiscal_year"),
+        source_type=row.get("source_type", "pdf"),
     )
 
 
 class DocumentRetriever:
     async def search(
         self,
-        owner_id: UUID,
         question: str,
         document_ids: tuple[UUID, ...] | None = None,
     ) -> list[SourcePassage]:
@@ -61,15 +95,15 @@ class DocumentRetriever:
         embedding = (await embed_texts([query_embedding_input(question)]))[0]
         async with await AsyncConnection.connect(str(settings.database_url)) as connection:
             await register_vector_async(connection)
-            semantic_ids = await self._semantic_search(connection, owner_id, document_ids, embedding)
-            lexical_ids = await self._lexical_search(connection, owner_id, document_ids, question)
+            semantic_ids = await self._semantic_search(connection, document_ids, embedding)
+            lexical_ids = await self._lexical_search(connection, document_ids, question)
             chunk_ids = reciprocal_rank_fusion(semantic_ids, lexical_ids)[: settings.retrieval_result_limit]
             if not chunk_ids:
                 return []
-            return await self._passages(connection, owner_id, document_ids, chunk_ids)
+            return await self._passages(connection, document_ids, chunk_ids)
 
     async def read_passage(
-        self, owner_id: UUID, chunk_id: UUID, *, include_neighbors: bool = False
+        self, chunk_id: UUID, *, include_neighbors: bool = False
     ) -> SourcePassage | None:
         async with (
             await AsyncConnection.connect(str(settings.database_url)) as connection,
@@ -78,12 +112,13 @@ class DocumentRetriever:
                 await cursor.execute(
                     """
                     SELECT c.id, c.document_id, c.position, c.text, c.page_number, c.section,
-                           c.metadata_json, d.original_filename
+                           c.metadata_json, d.original_filename, d.filing_type, d.filing_date,
+                           d.fiscal_year, d.company_name, d.ticker, d.source_type
                     FROM document_chunks c
                     JOIN source_documents d ON d.id = c.document_id
-                    WHERE c.id = %(chunk_id)s AND d.owner_id = %(owner_id)s AND d.status = 'ready'
+                    WHERE c.id = %(chunk_id)s AND d.status = 'ready'
                     """,
-                    {"chunk_id": chunk_id, "owner_id": owner_id},
+                    {"chunk_id": chunk_id},
                 )
                 row = await cursor.fetchone()
                 if row is None:
@@ -110,7 +145,6 @@ class DocumentRetriever:
     async def _semantic_search(
         self,
         connection: AsyncConnection,
-        owner_id: UUID,
         document_ids: tuple[UUID, ...] | None,
         embedding: list[float],
     ) -> list[UUID]:
@@ -122,7 +156,6 @@ class DocumentRetriever:
                 LIMIT %(limit)s
                 """,
                 {
-                    "owner_id": owner_id,
                     "document_ids": list(document_ids) if document_ids is not None else None,
                     "embedding": Vector(embedding),
                     "limit": settings.retrieval_semantic_candidate_limit,
@@ -133,22 +166,25 @@ class DocumentRetriever:
     async def _lexical_search(
         self,
         connection: AsyncConnection,
-        owner_id: UUID,
         document_ids: tuple[UUID, ...] | None,
         question: str,
     ) -> list[UUID]:
+        query_variants = _lexical_query_variants(question)
         async with connection.cursor(row_factory=dict_row) as cursor:
             await cursor.execute(
                 f"""
-                WITH query AS (SELECT websearch_to_tsquery('english', %(question)s) AS value)
-                SELECT c.id {_SCOPE} AND c.search_vector @@ (SELECT value FROM query)
-                ORDER BY ts_rank_cd(c.search_vector, (SELECT value FROM query)) DESC, c.id
+                WITH query AS (
+                    SELECT websearch_to_tsquery('english', %(question)s)
+                           || websearch_to_tsquery('english', %(alternate_question)s) AS value
+                )
+                SELECT c.id {_SCOPE} AND ({_LEXICAL_VECTOR}) @@ (SELECT value FROM query)
+                ORDER BY ts_rank_cd(({_LEXICAL_VECTOR}), (SELECT value FROM query)) DESC, c.id
                 LIMIT %(limit)s
                 """,
                 {
-                    "owner_id": owner_id,
                     "document_ids": list(document_ids) if document_ids is not None else None,
                     "question": question,
+                    "alternate_question": query_variants[-1],
                     "limit": settings.retrieval_lexical_candidate_limit,
                 },
             )
@@ -157,7 +193,6 @@ class DocumentRetriever:
     async def _passages(
         self,
         connection: AsyncConnection,
-        owner_id: UUID,
         document_ids: tuple[UUID, ...] | None,
         chunk_ids: list[UUID],
     ) -> list[SourcePassage]:
@@ -165,10 +200,11 @@ class DocumentRetriever:
             await cursor.execute(
                 f"""
                 SELECT c.id, c.document_id, c.text, c.page_number, c.section, c.metadata_json,
-                       d.original_filename {_SCOPE} AND c.id = ANY(%(chunk_ids)s)
+                       d.original_filename, d.filing_type, d.filing_date, d.fiscal_year,
+                       d.company_name, d.ticker, d.source_type
+                       {_SCOPE} AND c.id = ANY(%(chunk_ids)s)
                 """,
                 {
-                    "owner_id": owner_id,
                     "document_ids": list(document_ids) if document_ids is not None else None,
                     "chunk_ids": chunk_ids,
                 },

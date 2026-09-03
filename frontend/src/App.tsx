@@ -4,6 +4,7 @@ import type { Session } from '@supabase/supabase-js'
 
 import { supabase } from '@/lib/supabase'
 import { DocumentsPage } from '@/pages/documents-page'
+import { ChatPage } from '@/pages/chat-page'
 import { LoginPage } from '@/pages/login-page'
 
 function App() {
@@ -21,7 +22,8 @@ function App() {
       <Routes>
         <Route path="/login" element={<LoginPage session={session} />} />
         <Route path="/documents" element={session ? <DocumentsPage session={session} /> : <Navigate replace to="/login" />} />
-        <Route path="*" element={<Navigate replace to={session ? '/documents' : '/login'} />} />
+        <Route path="/chat" element={session ? <ChatPage session={session} /> : <Navigate replace to="/login" />} />
+        <Route path="*" element={<Navigate replace to={session ? '/chat' : '/login'} />} />
       </Routes>
     </BrowserRouter>
   )

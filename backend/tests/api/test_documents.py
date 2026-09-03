@@ -1,3 +1,4 @@
+from datetime import date
 from uuid import UUID
 
 import httpx
@@ -71,16 +72,26 @@ async def test_authenticated_user_can_upload_a_pdf(authenticated_app, monkeypatc
         "id": document_id,
         "original_filename": "company-10-k.pdf",
         "source_type": "pdf",
+        "filing_type": "10-K",
+        "filing_date": "2026-01-31",
         "status": "uploaded",
         "failure_detail": None,
         "created_at": "2026-09-02T10:30:00Z",
         "updated_at": "2026-09-02T10:30:00Z",
     }
 
-    async def fake_create(user: CurrentUser, filename: str, content: bytes) -> dict:
+    async def fake_create(
+        user: CurrentUser,
+        filename: str,
+        content: bytes,
+        filing_type: str | None,
+        filing_date: date | None,
+    ) -> dict:
         assert user.email == "analyst@driftwoodcapital.com"
         assert filename == "company-10-k.pdf"
         assert content == b"%PDF-valid"
+        assert filing_type == "10-K"
+        assert filing_date == date(2026, 1, 31)
         return document
 
     processed: list[tuple[str, str]] = []
@@ -97,22 +108,26 @@ async def test_authenticated_user_can_upload_a_pdf(authenticated_app, monkeypatc
         response = await client.post(
             "/documents",
             files={"file": ("company-10-k.pdf", b"%PDF-valid", "application/pdf")},
+            data={"filing_type": " 10-K ", "filing_date": "2026-01-31"},
         )
 
     assert response.status_code == 202
-    assert response.json() == document
+    assert response.json() == {**document, "can_manage": True}
     assert processed == [(document_id, "00000000-0000-0000-0000-000000000001")]
 
 
 @pytest.mark.anyio
-async def test_list_returns_only_public_document_fields(authenticated_app, monkeypatch) -> None:
+async def test_list_returns_shared_ready_documents_without_owner_ids(authenticated_app, monkeypatch) -> None:
     async def fake_list(owner_id: UUID) -> list[dict]:
         assert owner_id == UUID("00000000-0000-0000-0000-000000000001")
         return [
             {
                 "id": "41e9df93-90da-4ad5-b970-5211a186d381",
+                "owner_id": "00000000-0000-0000-0000-000000000002",
                 "original_filename": "company-10-k.pdf",
                 "source_type": "pdf",
+                "filing_type": "10-K",
+                "filing_date": "2026-01-31",
                 "status": "ready",
                 "failure_detail": None,
                 "created_at": "2026-09-02T10:30:00Z",
@@ -133,10 +148,13 @@ async def test_list_returns_only_public_document_fields(authenticated_app, monke
         "id": "41e9df93-90da-4ad5-b970-5211a186d381",
         "original_filename": "company-10-k.pdf",
         "source_type": "pdf",
+        "filing_type": "10-K",
+        "filing_date": "2026-01-31",
         "status": "ready",
         "failure_detail": None,
         "created_at": "2026-09-02T10:30:00Z",
         "updated_at": "2026-09-02T10:30:04Z",
+        "can_manage": False,
     }
 
 
@@ -162,6 +180,8 @@ async def test_failed_document_can_be_retried(authenticated_app, monkeypatch) ->
         "id": document_id,
         "original_filename": "company-10-k.pdf",
         "source_type": "pdf",
+        "filing_type": None,
+        "filing_date": None,
         "status": "uploaded",
         "failure_detail": None,
         "created_at": "2026-09-02T10:30:00Z",
@@ -186,7 +206,7 @@ async def test_failed_document_can_be_retried(authenticated_app, monkeypatch) ->
         response = await client.post(f"/documents/{document_id}/retry")
 
     assert response.status_code == 202
-    assert response.json() == document
+    assert response.json() == {**document, "can_manage": True}
     assert processed == [(document_id, "00000000-0000-0000-0000-000000000001")]
 
 

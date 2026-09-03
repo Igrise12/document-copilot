@@ -1,0 +1,1 @@
+"""Grounded Ollama assistant."""

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -6,6 +6,7 @@ from fastapi import (
     APIRouter,
     BackgroundTasks,
     Depends,
+    Form,
     HTTPException,
     Response,
     UploadFile,
@@ -32,10 +33,13 @@ class DocumentResponse(BaseModel):
     id: UUID
     original_filename: str
     source_type: SourceType
+    filing_type: str | None = None
+    filing_date: date | None = None
     status: DocumentStatus
     failure_detail: str | None
     created_at: datetime
     updated_at: datetime
+    can_manage: bool = False
 
 
 @router.post("", status_code=status.HTTP_202_ACCEPTED, response_model=DocumentResponse)
@@ -43,6 +47,8 @@ async def upload_document(
     file: UploadFile,
     background_tasks: BackgroundTasks,
     user: Annotated[CurrentUser, Depends(current_user)],
+    filing_type: Annotated[str | None, Form()] = None,
+    filing_date: Annotated[date | None, Form()] = None,
 ) -> dict[str, object]:
     if file.content_type != "application/pdf":
         raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "Only PDF uploads are supported")
@@ -55,16 +61,25 @@ async def upload_document(
     if not content or not content.startswith(b"%PDF-"):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Upload is not a valid PDF")
 
-    document = await create_document(user, file.filename or "document.pdf", bytes(content))
+    document = await create_document(
+        user,
+        file.filename or "document.pdf",
+        bytes(content),
+        filing_type.strip() or None if filing_type else None,
+        filing_date,
+    )
     background_tasks.add_task(process_document, document["id"], str(user.id))
-    return document
+    return {**document, "can_manage": True}
 
 
 @router.get("", response_model=list[DocumentResponse])
 async def documents(
     user: Annotated[CurrentUser, Depends(current_user)],
 ) -> list[dict[str, object]]:
-    return await list_documents(user.id)
+    return [
+        {**document, "can_manage": str(document["owner_id"]) == str(user.id)}
+        for document in await list_documents(user.id)
+    ]
 
 
 @router.post(
@@ -84,7 +99,7 @@ async def retry(
         raise HTTPException(status.HTTP_409_CONFLICT, "Only failed documents can be retried")
 
     background_tasks.add_task(process_document, document["id"], str(user.id))
-    return document
+    return {**document, "can_manage": True}
 
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -103,4 +118,4 @@ async def document(
     result = await get_document(user.id, document_id)
     if result is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
-    return result
+    return {**result, "can_manage": True}
