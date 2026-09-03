@@ -16,6 +16,12 @@ def test_metadata_uses_users_table() -> None:
     assert "profiles" not in Base.metadata.tables
 
 
+def test_chunks_can_be_stored_before_embeddings_are_generated() -> None:
+    from app.database import DocumentChunk
+
+    assert DocumentChunk.__table__.c.embedding.nullable is True
+
+
 def test_document_can_move_from_uploaded_to_processing() -> None:
     document = SourceDocument(status=DocumentStatus.UPLOADED)
 
@@ -31,9 +37,9 @@ def test_ready_document_cannot_return_to_processing() -> None:
         document.transition_to(DocumentStatus.PROCESSING)
 
 
-def test_failed_document_can_retry_processing() -> None:
+def test_failed_document_can_be_queued_for_retry() -> None:
     document = SourceDocument(status=DocumentStatus.FAILED)
 
-    document.transition_to(DocumentStatus.PROCESSING)
+    document.transition_to(DocumentStatus.UPLOADED)
 
-    assert document.status is DocumentStatus.PROCESSING
+    assert document.status is DocumentStatus.UPLOADED

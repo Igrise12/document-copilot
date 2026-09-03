@@ -1,3 +1,5 @@
+import pytest
+
 from app import supabase
 
 
@@ -27,6 +29,24 @@ def test_service_role_client_uses_service_role_key(monkeypatch) -> None:
     monkeypatch.setattr(supabase, "create_client", fake_create_client)
 
     supabase.service_role_client()
+
+    assert captured == {
+        "url": str(supabase.settings.supabase_url),
+        "key": supabase.settings.supabase_service_role_key,
+    }
+
+
+@pytest.mark.anyio
+async def test_async_service_role_client_uses_service_role_key(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    async def fake_create_client(url: str, key: str) -> object:
+        captured.update(url=url, key=key)
+        return object()
+
+    monkeypatch.setattr(supabase, "create_async_client", fake_create_client)
+
+    await supabase.async_service_role_client()
 
     assert captured == {
         "url": str(supabase.settings.supabase_url),

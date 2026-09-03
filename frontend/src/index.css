@@ -8,9 +8,12 @@
   font-family: 'Geist Variable', sans-serif; color: var(--foreground); background: var(--background); font-synthesis: none; text-rendering: optimizeLegibility;
 }
 * { box-sizing: border-box; }
+::selection { color: var(--primary-foreground); background: var(--primary); }
+* { scrollbar-color: var(--muted-foreground) var(--muted); }
 body { margin: 0; min-width: 320px; min-height: 100vh; }
 button, input { font: inherit; }
 button { cursor: pointer; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .auth-shell, .workspace-shell, .loading-screen { min-height: 100vh; }
 .auth-shell { display: grid; place-items: center; padding: 1.5rem; }
 .auth-panel { width: min(100%, 27rem); padding: 2.5rem; background: var(--card); border-radius: 1rem; box-shadow: 0 20px 50px rgb(26 33 53 / 0.12); }

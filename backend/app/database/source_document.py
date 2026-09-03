@@ -33,7 +33,7 @@ class SourceDocument(Timestamped, Base):
         transitions = {
             DocumentStatus.UPLOADED: {DocumentStatus.PROCESSING, DocumentStatus.FAILED},
             DocumentStatus.PROCESSING: {DocumentStatus.READY, DocumentStatus.FAILED},
-            DocumentStatus.FAILED: {DocumentStatus.PROCESSING},
+            DocumentStatus.FAILED: {DocumentStatus.UPLOADED},
             DocumentStatus.READY: set(),
         }
         if status not in transitions[self.status]:

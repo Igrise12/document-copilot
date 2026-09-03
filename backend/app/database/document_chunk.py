@@ -24,6 +24,6 @@ class DocumentChunk(Base):
     source_offset_start: Mapped[int | None]
     source_offset_end: Mapped[int | None]
     token_count: Mapped[int] = mapped_column(Integer)
-    embedding: Mapped[Any] = mapped_column(Vector(settings.openai_embedding_dimensions))
+    embedding: Mapped[Any | None] = mapped_column(Vector(settings.openai_embedding_dimensions))
     search_vector: Mapped[Any] = mapped_column(TSVECTOR, Computed("to_tsvector('english', text)", persisted=True))
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)

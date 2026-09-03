@@ -8,8 +8,9 @@
 
 ## Current status — 2026-09-02
 
-- Phases 1–2 are implemented. Backend unit tests and Ruff pass locally (11 tests).
+- Phases 1–3 (PDF slice) are implemented. Backend unit tests and Ruff pass locally (29 tests).
 - Phase 6 is implemented: the React SPA has validated configuration, Supabase email auth, protected routes, and an authenticated API client.
+- The protected document page supports 50 MiB PDF uploads, real upload progress, document-status polling, retry, and owner-only deletion. The live Supabase acceptance journey is still pending.
 - The remaining Phase 0 account and deployment decisions cannot be verified from the repository. The migration is marked applied below; confirm it targets the intended development Supabase project before building on it.
 - The frontend production build and TypeScript check pass using the installed project binaries. `pnpm` is not installed globally, so run the documented pnpm checks once it is available.
 
@@ -19,7 +20,7 @@
 - [ ] Enable email auth and set the Driftwood email-domain rule (for example, `@driftwoodcapital.com`). Disable email confirmation only for local development.
 - [ ] Create an OpenAI project/API key with a spend limit and usage alerts.
 - [ ] Create Railway services for `backend` and `frontend`; do not deploy application code yet.
-- [ ] Decide the initial upload limits: max file size, accepted MIME types, and who may delete a document. Record the values in `README.md` when decided.
+- [x] Decide the initial upload limits: max file size, accepted MIME types, and who may delete a document. Record the values in `README.md` when decided. (PDF, 50 MiB, owner deletion.)
 - [x] Download a small representative corpus with `uv run data/download.py` for development and evaluation.
 
 ## Phase 1 — Backend foundation
@@ -46,26 +47,29 @@
 
 ### Backend
 
-- [ ] Add `POST /documents` to accept an authenticated upload, validate file size/type at the HTTP boundary, store the original privately, create the document record, and return its status.
-- [ ] Add `GET /documents` and `GET /documents/{id}`; scope both to the requesting analyst.
-- [ ] Run ingestion outside the upload request. Start with FastAPI background tasks; move to a dedicated worker only if document volume or timeouts require it.
-- [ ] Implement extraction adapters for PDF and SEC HTML/text that return normalized text plus page/section locations.
-- [ ] Chunk extracted text with stable chunk indices and overlap small enough to preserve context without creating duplicate evidence.
-- [ ] Generate OpenAI embeddings in batches, store chunks, and mark the document `ready` only after all chunks are written.
-- [ ] Mark failures `failed` with a safe user-facing explanation and a logged technical cause; never leave a document indefinitely `processing`.
-- [ ] Add `POST /documents/{id}/retry` for a document owner and `DELETE /documents/{id}` to remove the Storage object, chunks, and metadata together.
-- [ ] Add focused tests for file validation, extraction metadata, chunk boundaries, and status/error handling. Run one integration check using a real small filing.
+- [x] Add `POST /documents` to accept an authenticated upload, validate file size/type at the HTTP boundary, store the original privately, create the document record, and return its status.
+- [x] Add `GET /documents` and `GET /documents/{id}`; scope both to the requesting analyst.
+- [x] Run ingestion outside the upload request with FastAPI background tasks.
+- [x] Implement PDF extraction with normalized text and page locations.
+- [ ] Implement SEC HTML/text extraction with section locations.
+- [x] Chunk extracted text with stable chunk indices and overlap small enough to preserve context without creating duplicate evidence.
+- [x] Store extracted chunks and mark the document `ready` only after they are written.
+- [x] Mark ingestion exceptions `failed` with a safe user-facing explanation and a logged technical cause.
+- [x] Add `POST /documents/{id}/retry` for a document owner and `DELETE /documents/{id}` to remove the Storage object, chunks, and metadata together.
+- [x] Add focused unit tests for file validation, extraction metadata, chunk boundaries, and status/error handling.
+- [ ] Run one integration check using a real small filing.
 
 ### Frontend
 
-- [ ] Add a protected document page with an upload control, accepted-file guidance, file-size validation, and upload progress.
-- [ ] Show the authenticated analyst's documents with `uploaded`, `processing`, `ready`, and `failed` states.
-- [ ] Poll while a document is processing; stop on `ready`, `failed`, navigation away, or unmount.
-- [ ] Add retry and delete controls, including an accessible confirmation before deletion.
+- [x] Add a protected document page with an upload control, accepted-file guidance, file-size validation, and upload progress.
+- [x] Show the authenticated analyst's documents with `uploaded`, `processing`, `ready`, and `failed` states.
+- [x] Poll while a document is processing; stop on `ready`, `failed`, navigation away, or unmount.
+- [x] Add retry and delete controls, including an accessible confirmation before deletion.
 - [ ] Manual acceptance check: sign in, upload one filing, refresh the page, and see it progress to `ready` without exposing privileged credentials.
 
 ## Phase 4 — Retrieval and grounding
 
+- [ ] Generate embeddings for ready document chunks in batches and store them before enabling semantic search.
 - [ ] Implement query embedding plus separate pgvector and Postgres full-text searches over only `ready` documents the user may access.
 - [ ] Fuse semantic and lexical ranked results with Reciprocal Rank Fusion in Python; keep weights and result limits in settings, not scattered literals.
 - [ ] Fetch neighboring chunks only when needed to make a cited passage readable; preserve the exact cited chunk/page in the response.
@@ -97,7 +101,7 @@
 ## Phase 7 — Upload and document UI
 
 - [ ] Make ready documents discoverable by name, company, filing type, fiscal year, and upload date.
-- [ ] Provide an empty state that explains the first action: upload a filing before asking questions about it.
+- [x] Provide an empty state that explains the first action: upload a filing before asking questions about it.
 - [ ] Manually verify desktop and narrow-browser layouts, keyboard upload, and error messages.
 
 ## Phase 8 — Chat and citation UI
@@ -132,10 +136,8 @@
 
 ## Recommended next work session
 
-1. Close the external prerequisites: finish the remaining Phase 0 account/settings tasks, decide upload limits and deletion ownership, and record those limits in `README.md`.
-2. Confirm the development migration and fix frontend toolchain hygiene: install pnpm, remove the accidental `package-lock.json`, then run `pnpm tsc --noEmit` and `pnpm lint`.
-3. Build the Phase 3 backend for a single PDF upload: implement the authenticated upload endpoint, private Storage write, document status record, and background extraction/chunking. Prove it with one small filing before adding retry/delete or SEC HTML support.
-4. Build the Phase 3 frontend needed to exercise that slice: a protected document upload/status page that polls processing state. Do not build chat UI yet.
-5. Once one document reaches `ready`, implement retrieval and one grounded, cited answer before expanding chat persistence, document browsing, or deployment work.
+1. Configure the development Supabase/OpenAI settings and both frontend/backend upload-limit variables; confirm the applied migration targets the intended project.
+2. Run the real acceptance journey with one small PDF: sign in, upload, refresh while processing, reach `ready`, then verify retry/delete with a controlled ingestion failure.
+3. After one filing reaches `ready`, implement retrieval and one grounded, cited answer. Keep SEC HTML/text ingestion deferred until that trust-critical path works.
 
 **Recommendation:** Keep the scope to the PDF upload → ready → one cited answer journey. It is the fastest way to validate the product's trust-critical path; everything else can follow evidence from that working slice.
