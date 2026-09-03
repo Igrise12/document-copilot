@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 from postgrest.types import ReturnMethod
 
 from app.auth.current_user import CurrentUser
+from app.config import settings
 from app.ingestion.chunking import TextChunk
 from app.supabase import async_service_role_client
 
@@ -64,7 +65,7 @@ async def get_document(owner_id: UUID, document_id: UUID) -> dict[str, Any] | No
         .maybe_single()
         .execute()
     )
-    return response.data
+    return response.data if response else None
 
 
 async def retry_document(owner_id: UUID, document_id: UUID) -> dict[str, Any] | None:
@@ -96,7 +97,7 @@ async def delete_document(owner_id: UUID, document_id: UUID) -> bool:
         .maybe_single()
         .execute()
     )
-    if response.data is None:
+    if response is None:
         return False
 
     await client.storage.from_(BUCKET).remove([response.data["storage_path"]])
@@ -110,7 +111,7 @@ async def delete_document(owner_id: UUID, document_id: UUID) -> bool:
     return True
 
 
-async def begin_processing(owner_id: UUID, document_id: UUID) -> str:
+async def begin_processing(owner_id: UUID, document_id: UUID) -> dict[str, Any]:
     client = await async_service_role_client()
     response = await (
         client.table("source_documents")
@@ -128,7 +129,7 @@ async def begin_processing(owner_id: UUID, document_id: UUID) -> str:
     )
     if not response.data:
         raise ValueError("document is not available for processing")
-    return response.data[0]["storage_path"]
+    return response.data[0]
 
 
 async def download_document(storage_path: str) -> bytes:
@@ -136,11 +137,10 @@ async def download_document(storage_path: str) -> bytes:
     return await client.storage.from_(BUCKET).download(storage_path)
 
 
-async def complete_document(
+async def store_document_content(
     owner_id: UUID,
     document_id: UUID,
     normalized_content: str,
-    chunks: list[TextChunk],
 ) -> None:
     client = await async_service_role_client()
     await (
@@ -154,28 +154,80 @@ async def complete_document(
         .eq("status", "processing")
         .execute()
     )
-    await client.table("document_chunks").insert(
+
+
+async def stored_chunk_hashes(document_id: UUID) -> dict[int, str]:
+    client = await async_service_role_client()
+    response = await (
+        client.table("document_chunks")
+        .select("position,metadata_json")
+        .eq("document_id", str(document_id))
+        .execute()
+    )
+    return {
+        row["position"]: metadata["text_hash"]
+        for row in response.data
+        if (metadata := row["metadata_json"]).get("embedding_model")
+        == settings.ollama_embedding_model
+        and metadata.get("text_hash")
+    }
+
+
+async def store_document_chunks(
+    owner_id: UUID,
+    document_id: UUID,
+    chunks: list[TextChunk],
+    embeddings: list[list[float]],
+) -> None:
+    if len(chunks) != len(embeddings):
+        raise ValueError("every chunk must have an embedding")
+    client = await async_service_role_client()
+    await client.table("document_chunks").upsert(
         [
             {
+                "id": str(uuid4()),
                 "document_id": str(document_id),
                 "position": chunk.position,
                 "text": chunk.text,
                 "page_number": chunk.page_number,
-                "section": None,
+                "section": chunk.section,
                 "source_offset_start": chunk.source_offset_start,
                 "source_offset_end": chunk.source_offset_end,
                 "token_count": chunk.token_count,
-                "embedding": None,
-                "metadata_json": {},
+                "embedding": embedding,
+                "metadata_json": {
+                    **chunk.metadata_json,
+                    "embedding_model": settings.ollama_embedding_model,
+                },
             }
-            for chunk in chunks
+            for chunk, embedding in zip(chunks, embeddings, strict=True)
         ],
+        on_conflict="document_id,position",
         returning=ReturnMethod.minimal,
     ).execute()
+
+
+async def complete_document(owner_id: UUID, document_id: UUID) -> None:
+    client = await async_service_role_client()
     await (
         client.table("source_documents")
         .update(
             {"status": "ready", "updated_at": datetime.now(UTC).isoformat()},
+            returning=ReturnMethod.minimal,
+        )
+        .eq("owner_id", str(owner_id))
+        .eq("id", str(document_id))
+        .eq("status", "processing")
+        .execute()
+    )
+
+
+async def return_to_uploaded(owner_id: UUID, document_id: UUID) -> None:
+    client = await async_service_role_client()
+    await (
+        client.table("source_documents")
+        .update(
+            {"status": "uploaded", "updated_at": datetime.now(UTC).isoformat()},
             returning=ReturnMethod.minimal,
         )
         .eq("owner_id", str(owner_id))

@@ -20,6 +20,7 @@ def test_chunks_can_be_stored_before_embeddings_are_generated() -> None:
     from app.database import DocumentChunk
 
     assert DocumentChunk.__table__.c.embedding.nullable is True
+    assert DocumentChunk.__table__.c.embedding.type.dim == 768
 
 
 def test_document_can_move_from_uploaded_to_processing() -> None:

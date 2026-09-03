@@ -6,9 +6,10 @@
 
 **First release boundary:** PDF and SEC HTML/text uploads; email login restricted to Driftwood addresses; no OCR, external data, investment recommendations, mobile app, or multi-tenancy.
 
-## Current status — 2026-09-02
+## Current status — 2026-09-03
 
-- Phases 1–3 (PDF slice) are implemented. Backend unit tests and Ruff pass locally (29 tests).
+- Phases 1–3 (PDF slice) are implemented. Phase 4 retrieval/grounding is implemented and its guarded 768d migration has been applied to the development Supabase project. Backend unit tests and Ruff pass locally (46 tests).
+- The local Ollama Podman endpoint has `embeddinggemma:latest`; the one-chunk AAPL pilot stored a 768d vector with section metadata and remains `uploaded`, so it is correctly excluded from retrieval. Full-corpus ingestion and manual evaluation remain pending.
 - Phase 6 is implemented: the React SPA has validated configuration, Supabase email auth, protected routes, and an authenticated API client.
 - The protected document page supports 50 MiB PDF uploads, real upload progress, document-status polling, retry, and owner-only deletion. The live Supabase acceptance journey is still pending.
 - The remaining Phase 0 account and deployment decisions cannot be verified from the repository. The migration is marked applied below; confirm it targets the intended development Supabase project before building on it.
@@ -18,15 +19,15 @@
 
 - [ ] Create the Supabase project and record its URL, anon key, service-role key, direct database URL, and Storage region in the password manager.
 - [ ] Enable email auth and set the Driftwood email-domain rule (for example, `@driftwoodcapital.com`). Disable email confirmation only for local development.
-- [ ] Create an OpenAI project/API key with a spend limit and usage alerts.
+- [ ] Run Ollama with Podman, pull the chosen chat and embedding models, and record their tags, host port, volume, and resource requirements in `README.md`.
 - [ ] Create Railway services for `backend` and `frontend`; do not deploy application code yet.
 - [x] Decide the initial upload limits: max file size, accepted MIME types, and who may delete a document. Record the values in `README.md` when decided. (PDF, 50 MiB, owner deletion.)
 - [x] Download a small representative corpus with `uv run data/download.py` for development and evaluation.
 
 ## Phase 1 — Backend foundation
 
-- [x] From `backend/`, initialize the FastAPI project with the declared dependencies only: FastAPI, Pydantic settings, SQLAlchemy/Alembic, Supabase, OpenAI, pgvector, HTTPX, Structlog, Pytest, and Ruff.
-- [x] Create `app/config.py` as the only environment reader. Validate Supabase URL/keys, direct database URL, OpenAI key, allowed email domain, frontend origin, upload limits, and model names at startup.
+- [x] From `backend/`, initialize the FastAPI project with the declared dependencies only: FastAPI, Pydantic settings, SQLAlchemy/Alembic, Supabase, pgvector, HTTPX, Structlog, Pytest, and Ruff.
+- [x] Create `app/config.py` as the only environment reader. Validate Supabase URL/keys, direct database URL, Ollama base URL, allowed email domain, frontend origin, upload limits, and chat/embedding model names at startup.
 - [x] Add `app/main.py` with a health endpoint, CORS for the frontend origin, structured request logging, and startup validation.
 - [x] Add `GET /health` and verify it locally with `curl`.
 - [x] Configure Ruff and Pytest; ensure `uv run ruff check .` and `uv run pytest -m "not integration"` pass without network access.
@@ -69,22 +70,22 @@
 
 ## Phase 4 — Retrieval and grounding
 
-- [ ] Generate embeddings for ready document chunks in batches and store them before enabling semantic search.
-- [ ] Implement query embedding plus separate pgvector and Postgres full-text searches over only `ready` documents the user may access.
-- [ ] Fuse semantic and lexical ranked results with Reciprocal Rank Fusion in Python; keep weights and result limits in settings, not scattered literals.
-- [ ] Fetch neighboring chunks only when needed to make a cited passage readable; preserve the exact cited chunk/page in the response.
-- [ ] Define small typed `SourcePassage`, `Citation`, and `GroundedAnswer` models.
-- [ ] Implement citation validation: each citation must reference a retrieved chunk and include document name plus page or section location.
-- [ ] Return a clear “not enough evidence in the uploaded corpus” response when retrieval cannot support an answer.
-- [ ] Add unit tests for rank fusion, document scoping, citation validation, and insufficient-evidence behavior.
-- [ ] Create a small evaluation question set from the five sample companies, including at least one question that must refuse to infer beyond the filings.
+- [x] Generate embeddings in batches and store them before marking a document `ready`. The local Docling HybridChunker uses a conservative 512 UTF-8-byte budget rather than a remote tokenizer; the one-chunk AAPL pilot stored one 768d vector.
+- [x] Implement query embedding plus separate pgvector and Postgres full-text searches over only `ready` documents the user may access.
+- [x] Fuse semantic and lexical ranked results with Reciprocal Rank Fusion in Python; keep weights and result limits in settings, not scattered literals.
+- [x] Fetch neighboring chunks only when needed to make a cited passage readable; preserve the exact cited chunk/page in the response.
+- [x] Define small typed `SourcePassage`, `Citation`, and `GroundedAnswer` models.
+- [x] Implement citation validation: each citation must reference a retrieved chunk and include document name plus page or section location.
+- [x] Return a clear “not enough evidence in the uploaded corpus” response when retrieval cannot support an answer.
+- [x] Add unit tests for rank fusion, document scoping, citation validation, and insufficient-evidence behavior.
+- [x] Create a small evaluation question set from the five sample companies, including at least one question that must refuse to infer beyond the filings.
 - [ ] Run the evaluation manually after retrieval changes; fix retrieval/grounding before tuning answer style.
 
 ## Phase 5 — Chat API and persistence
 
 - [ ] Add thread endpoints: create, list, rename, load messages, and delete. Every query must be owner-scoped.
 - [ ] Add a streaming chat endpoint that authenticates, saves the user message, retrieves evidence, generates the answer, validates citations, streams text/status, then saves the assistant message and citation rows.
-- [ ] Keep the OpenAI prompt narrow: use retrieved material only, cite every factual claim, disclose insufficient evidence, and never give a stock recommendation.
+- [ ] Keep the Ollama prompt narrow: use retrieved material only, cite every factual claim, disclose insufficient evidence, and never give a stock recommendation.
 - [ ] Persist enough usage/request metadata to investigate failures without storing secrets or access tokens.
 - [ ] Make cancellation safe: a cancelled stream must not create a falsely completed assistant answer.
 - [ ] Add API tests for unauthorized access, thread ownership, persisted citations, insufficient evidence, and streaming error paths.
@@ -117,7 +118,7 @@
 
 - [ ] Review every backend endpoint, database query, Storage action, and signed URL for user/document ownership enforcement.
 - [ ] Confirm service-role keys appear only in backend configuration and Railway backend variables; confirm no secret is bundled into the frontend.
-- [ ] Set request/file limits, OpenAI timeout/retry behavior, and structured error logging. Do not retry unsafe writes blindly.
+- [ ] Set request/file limits, Ollama timeout/retry behavior, and structured error logging. Do not retry unsafe writes blindly.
 - [ ] Add a document-processing recovery check for files stuck in `processing` after a deployment/restart.
 - [ ] Add a concise operator runbook: configure secrets, run migrations, inspect failed ingestion, retry/delete documents, and rotate keys.
 - [ ] Update `README.md` with exact local setup, migration, backend/frontend run, ingestion, and verification commands.
@@ -136,7 +137,7 @@
 
 ## Recommended next work session
 
-1. Configure the development Supabase/OpenAI settings and both frontend/backend upload-limit variables; confirm the applied migration targets the intended project.
+1. Configure the development Supabase/Ollama settings and both frontend/backend upload-limit variables; confirm the applied migration targets the intended project.
 2. Run the real acceptance journey with one small PDF: sign in, upload, refresh while processing, reach `ready`, then verify retry/delete with a controlled ingestion failure.
 3. After one filing reaches `ready`, implement retrieval and one grounded, cited answer. Keep SEC HTML/text ingestion deferred until that trust-critical path works.
 

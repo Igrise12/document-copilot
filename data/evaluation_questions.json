@@ -1,0 +1,73 @@
+[
+  {
+    "id": "apple-2025-net-sales",
+    "accession_number": "0000320193-25-000079",
+    "question": "What net sales did Apple report for fiscal 2025?",
+    "expected_behavior": "answer_with_citation"
+  },
+  {
+    "id": "apple-net-sales-table",
+    "accession_number": "0000320193-25-000079",
+    "question": "What amount appears in Apple's Net Sales table for fiscal 2025?",
+    "expected_behavior": "answer_with_citation",
+    "expected_location_hint": "Net Sales"
+  },
+  {
+    "id": "microsoft-2025-revenue",
+    "accession_number": "0000950170-25-100235",
+    "question": "What revenue did Microsoft report for fiscal 2025?",
+    "expected_behavior": "answer_with_citation"
+  },
+  {
+    "id": "microsoft-intelligent-cloud-table",
+    "accession_number": "0000950170-25-100235",
+    "question": "What amount is reported for Intelligent Cloud in Microsoft's segment information table?",
+    "expected_behavior": "answer_with_citation",
+    "expected_location_hint": "Intelligent Cloud"
+  },
+  {
+    "id": "nvidia-2025-revenue",
+    "accession_number": "0001045810-25-000023",
+    "question": "What revenue did NVIDIA report for fiscal 2025?",
+    "expected_behavior": "answer_with_citation"
+  },
+  {
+    "id": "nvidia-compute-networking-table",
+    "accession_number": "0001045810-25-000023",
+    "question": "What revenue is reported for NVIDIA's Compute & Networking segment?",
+    "expected_behavior": "answer_with_citation",
+    "expected_location_hint": "Compute & Networking"
+  },
+  {
+    "id": "amazon-2025-net-sales",
+    "accession_number": "0001018724-26-000004",
+    "question": "What net sales did Amazon report for 2025?",
+    "expected_behavior": "answer_with_citation"
+  },
+  {
+    "id": "amazon-aws-net-sales-table",
+    "accession_number": "0001018724-26-000004",
+    "question": "What net sales are reported for AWS in Amazon's net sales table for 2025?",
+    "expected_behavior": "answer_with_citation",
+    "expected_location_hint": "AWS"
+  },
+  {
+    "id": "alphabet-2025-revenues",
+    "accession_number": "0001652044-26-000018",
+    "question": "What revenues did Alphabet report for 2025?",
+    "expected_behavior": "answer_with_citation"
+  },
+  {
+    "id": "alphabet-google-services-table",
+    "accession_number": "0001652044-26-000018",
+    "question": "What revenue is reported for Google Services in Alphabet's revenues by type table?",
+    "expected_behavior": "answer_with_citation",
+    "expected_location_hint": "Google Services"
+  },
+  {
+    "id": "2026-revenue-prediction",
+    "question": "Which company will have the highest revenue in 2026?",
+    "expected_behavior": "insufficient_evidence",
+    "expected_answer": "Not enough evidence in the uploaded corpus to answer this question."
+  }
+]

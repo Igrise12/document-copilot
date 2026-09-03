@@ -11,22 +11,30 @@ class Settings(BaseSettings):
     supabase_anon_key: str
     supabase_service_role_key: str
     database_url: PostgresDsn
-    openai_api_key: str
+    ollama_base_url: AnyHttpUrl
     allowed_email_domain: str
     allowed_origins: str
     max_upload_bytes: int
     allowed_upload_media_types: str
-    openai_chat_model: str
-    openai_embedding_model: str
-    openai_embedding_dimensions: int
+    ollama_chat_model: str
+    ollama_embedding_model: str
+    ollama_embedding_dimensions: int
+    ingestion_chunk_max_bytes: int = 512
+    ollama_embedding_batch_size: int = 16
+    ollama_timeout_seconds: float = 120
+    retrieval_semantic_candidate_limit: int = 20
+    retrieval_lexical_candidate_limit: int = 20
+    retrieval_result_limit: int = 8
+    retrieval_rrf_k: int = 60
+    retrieval_semantic_weight: float = 1
+    retrieval_lexical_weight: float = 1
 
     @field_validator(
         "supabase_anon_key",
         "supabase_service_role_key",
-        "openai_api_key",
         "allowed_upload_media_types",
-        "openai_chat_model",
-        "openai_embedding_model",
+        "ollama_chat_model",
+        "ollama_embedding_model",
     )
     @classmethod
     def require_value(cls, value: str) -> str:
@@ -52,9 +60,21 @@ class Settings(BaseSettings):
             AnyHttpUrl(origin)
         return ",".join(origins)
 
-    @field_validator("max_upload_bytes", "openai_embedding_dimensions")
+    @field_validator(
+        "max_upload_bytes",
+        "ollama_embedding_dimensions",
+        "ingestion_chunk_max_bytes",
+        "ollama_embedding_batch_size",
+        "ollama_timeout_seconds",
+        "retrieval_semantic_candidate_limit",
+        "retrieval_lexical_candidate_limit",
+        "retrieval_result_limit",
+        "retrieval_rrf_k",
+        "retrieval_semantic_weight",
+        "retrieval_lexical_weight",
+    )
     @classmethod
-    def require_positive(cls, value: int) -> int:
+    def require_positive(cls, value: float) -> float:
         if value <= 0:
             raise ValueError("must be positive")
         return value
