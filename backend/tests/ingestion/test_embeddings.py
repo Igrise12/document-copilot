@@ -70,3 +70,9 @@ async def test_embed_texts_rejects_the_wrong_dimension(monkeypatch) -> None:
 def test_embedding_prompts_use_document_and_query_forms() -> None:
     assert document_embedding_input("filing.pdf", "Revenue") == "title: filing.pdf | text: Revenue"
     assert query_embedding_input("What was revenue?") == "task: search result | query: What was revenue?"
+
+
+def test_document_embedding_input_fits_the_model_context() -> None:
+    value = document_embedding_input("nvda-20250126.htm", "x" * settings.ingestion_chunk_max_bytes)
+
+    assert len(value.encode()) == settings.ollama_embedding_max_input_bytes

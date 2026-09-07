@@ -1,12 +1,12 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import type { Session } from '@supabase/supabase-js'
-import { FileText, LogOut, MessageSquare, Plus, Send, Square, X } from 'lucide-react'
+import { FileText, MessageSquare, Send, Square, X } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { WorkspaceShell } from '@/components/workspace-shell'
 import { api } from '@/lib/api'
 import { ApiError, type StreamEvent } from '@/lib/http'
-import { supabase } from '@/lib/supabase'
 
 type DocumentSummary = {
   id: string
@@ -90,7 +90,12 @@ function citationLocation(citation: Citation): string {
 
 export function ChatPage({ session }: ChatPageProps) {
   const navigate = useNavigate()
+  const location = useLocation()
+  const [searchParams] = useSearchParams()
+  const startNewChat = useRef(location.state?.newChat === true)
+  const requestedThreadId = useRef(searchParams.get('thread'))
   const streamController = useRef<AbortController | null>(null)
+  const sending = useRef(false)
   const passageDialog = useRef<HTMLDialogElement>(null)
   const questionInput = useRef<HTMLTextAreaElement>(null)
   const [documents, setDocuments] = useState<DocumentSummary[]>([])
@@ -135,9 +140,10 @@ export function ChatPage({ session }: ChatPageProps) {
         ])
         setDocuments(nextDocuments)
         setThreads(nextThreads)
-        if (nextThreads[0]) {
-          setThreadId(nextThreads[0].id)
-          setMessages(await api.get<ChatMessage[]>(`/threads/${nextThreads[0].id}/messages`, controller.signal))
+        const initialThread = startNewChat.current ? undefined : nextThreads.find((thread) => thread.id === requestedThreadId.current) ?? nextThreads[0]
+        if (initialThread) {
+          setThreadId(initialThread.id)
+          setMessages(await api.get<ChatMessage[]>(`/threads/${initialThread.id}/messages`, controller.signal))
         }
       } catch (error) {
         if (!controller.signal.aborted) setLoadError(messageFrom(error))
@@ -178,7 +184,8 @@ export function ChatPage({ session }: ChatPageProps) {
   async function sendQuestion(content?: string, documentIds = scope === 'all' ? null : selectedDocumentIds) {
     const fromInput = content === undefined
     const cleaned = (content ?? question).trim()
-    if (!cleaned || isStreaming || !readyDocuments.length || documentIds?.length === 0) return
+    if (!cleaned || sending.current || !readyDocuments.length || documentIds?.length === 0) return
+    sending.current = true
 
     if (fromInput) setQuestion('')
     setIsStreaming(true)
@@ -194,6 +201,7 @@ export function ChatPage({ session }: ChatPageProps) {
     } catch (error) {
       if (fromInput) setQuestion(cleaned)
       setIsStreaming(false)
+      sending.current = false
       setLoadError(messageFrom(error))
       return
     }
@@ -269,7 +277,8 @@ export function ChatPage({ session }: ChatPageProps) {
         },
         controller.signal,
       )
-      if (completed || terminalError) await loadMessages(targetThreadId)
+      if (!completed && !terminalError) throw new ApiError('The answer stream ended before completion. Please retry.')
+      await loadMessages(targetThreadId)
     } catch (error) {
       if (controller.signal.aborted) {
         replaceMessage(assistantId, (message) => ({ ...message, state: 'cancelled', content: 'Answer generation stopped.' }))
@@ -284,6 +293,7 @@ export function ChatPage({ session }: ChatPageProps) {
     } finally {
       if (streamController.current === controller) streamController.current = null
       setIsStreaming(false)
+      sending.current = false
       setStatus(null)
     }
   }
@@ -306,12 +316,6 @@ export function ChatPage({ session }: ChatPageProps) {
     setPassageError(null)
   }
 
-  async function signOut() {
-    streamController.current?.abort()
-    await supabase.auth.signOut()
-    navigate('/login', { replace: true })
-  }
-
   function scopeLabel(documentIds: string[] | null): string {
     if (documentIds === null) return 'All ready documents'
     if (documentIds.length === 1) return documents.find((document) => document.id === documentIds[0])?.original_filename ?? '1 selected document'
@@ -325,40 +329,8 @@ export function ChatPage({ session }: ChatPageProps) {
   const canSend = Boolean(question.trim()) && !isStreaming && readyDocuments.length > 0 && (scope === 'all' || selectedDocumentIds.length > 0)
 
   return (
-    <main className="min-h-screen bg-background">
-      <header className="mx-auto flex min-h-20 max-w-7xl items-center justify-between gap-3 border-b border-border px-5 sm:px-8">
-        <button className="text-left text-xs font-semibold uppercase tracking-[0.08em] text-primary" onClick={() => navigate('/documents')}>Driftwood Capital</button>
-        <div className="flex items-center gap-2 sm:gap-3">
-          <span className="hidden text-sm text-muted-foreground lg:inline">{session.user.email}</span>
-          <Button onClick={() => navigate('/documents')} variant="outline"><FileText />Documents</Button>
-          <Button onClick={signOut} variant="outline"><LogOut />Sign out</Button>
-        </div>
-      </header>
-
-      <div className="mx-auto grid max-w-7xl gap-8 px-5 py-8 lg:grid-cols-[15rem_minmax(0,1fr)] lg:px-8">
-        <aside className="lg:border-r lg:border-border lg:pr-6" aria-label="Chat threads">
-          <div className="flex items-center justify-between gap-3">
-            <h1 className="text-2xl">Research chat</h1>
-            <Button aria-label="New chat" disabled={isStreaming} onClick={resetChat} size="icon" variant="outline"><Plus /></Button>
-          </div>
-          <p className="mt-3 text-sm leading-6 text-muted-foreground">Ask only what the shared research corpus can support.</p>
-          <div className="mt-5 lg:hidden">
-            <label className="sr-only" htmlFor="thread-select">Chat thread</label>
-            <select className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm" id="thread-select" onChange={(event) => void selectThread(event.target.value)} value={threadId ?? ''}>
-              <option value="">New chat</option>
-              {threads.map((thread) => <option key={thread.id} value={thread.id}>{thread.title}</option>)}
-            </select>
-          </div>
-          <ul className="mt-5 hidden space-y-1 lg:block">
-            {threads.map((thread) => (
-              <li key={thread.id}>
-                <button className={`w-full truncate rounded-lg px-3 py-2 text-left text-sm ${thread.id === threadId ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`} onClick={() => void selectThread(thread.id)}>{thread.title}</button>
-              </li>
-            ))}
-          </ul>
-        </aside>
-
-        <section className="min-w-0" aria-labelledby="conversation-title">
+    <WorkspaceShell activeThreadId={threadId} onNewQuestion={resetChat} onSelectThread={(id) => void selectThread(id)} session={session} threads={threads}>
+      <section className="chat-page" aria-labelledby="conversation-title">
           <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5">
             <div>
               <h2 className="text-3xl" id="conversation-title">{threadId ? threads.find((thread) => thread.id === threadId)?.title ?? 'Conversation' : 'New conversation'}</h2>
@@ -368,7 +340,7 @@ export function ChatPage({ session }: ChatPageProps) {
           </div>
 
           {loadError && <p className="mt-5 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-900" role="alert">{loadError}</p>}
-          {isLoading ? <p className="mt-10 text-sm text-muted-foreground">Loading your research workspace…</p> : !readyDocuments.length ? (
+          {isLoading ? <div className="chat-loading" aria-label="Loading your research workspace"><span className="skeleton skeleton-line" /><span className="skeleton skeleton-line" /><span className="skeleton skeleton-short" /></div> : !readyDocuments.length ? (
             <div className="mt-10 border-y border-border py-12 text-center">
               <FileText className="mx-auto size-7 text-muted-foreground" />
               <p className="mt-4 font-medium">The research corpus is not ready yet</p>
@@ -377,36 +349,43 @@ export function ChatPage({ session }: ChatPageProps) {
             </div>
           ) : (
             <>
-              <div className="mt-8 space-y-6" aria-live="polite">
+              <div className="chat-messages" aria-live="polite">
                 {messages.length === 0 ? (
-                  <div className="border-y border-border py-12">
+                  <div className="chat-empty">
                     <MessageSquare className="size-7 text-primary" />
                     <p className="mt-4 font-medium">Start with a question about the research corpus</p>
                     <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">Answers use only ready documents and link back to the precise supporting passage.</p>
+                    <div className="starter-prompts">
+                      {[
+                        'How did Apple’s revenue mix change from 2021 to 2025?',
+                        'Compare AWS operating margins with Amazon’s other segments.',
+                        'What changed in NVIDIA’s Data Center demand drivers?',
+                      ].map((prompt) => <button key={prompt} onClick={() => { setQuestion(prompt); questionInput.current?.focus() }} type="button">{prompt}</button>)}
+                    </div>
                   </div>
                 ) : messages.map((message, index) => {
                   const questionForAnswer = message.role === 'assistant' ? previousQuestion(index) : undefined
                   const failedQuestion = message.role === 'user' && (message.state === 'failed' || message.state === 'cancelled')
                   return (
-                    <article className={message.role === 'user' ? 'ml-auto max-w-2xl rounded-xl bg-muted px-4 py-3' : 'max-w-3xl'} key={message.id}>
-                      <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+                    <article className={message.role === 'user' ? 'chat-message-user' : 'chat-message-answer'} key={message.id}>
+                      <div className="chat-message-label">
                         <span>{message.role === 'user' ? 'You' : 'Document Copilot'}</span>
                         {message.role === 'assistant' && questionForAnswer && <span className="normal-case tracking-normal">· {scopeLabel(questionForAnswer.document_ids)}</span>}
                       </div>
-                      {message.role === 'assistant' && message.state === 'running' && !message.content && <p className="mt-3 text-sm text-muted-foreground">{status ?? 'Preparing your answer…'}</p>}
+                      {message.role === 'assistant' && message.state === 'running' && !message.content && <p className="chat-stream-status"><span className="stream-dot" />{status ?? 'Preparing your answer…'}</p>}
                       {message.content && <p className={`mt-2 whitespace-pre-wrap text-sm leading-7 ${message.insufficient_evidence ? 'rounded-lg bg-amber-50 px-4 py-3 text-amber-950' : ''}`}>{message.content}</p>}
                       {message.insufficient_evidence && <p className="mt-2 text-xs text-muted-foreground">This is a grounded refusal, not a connection or server error.</p>}
                       {(message.state === 'failed' || message.state === 'cancelled') && (
                         <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-                          <span className="text-destructive">{message.state === 'cancelled' ? 'Answer stopped.' : 'The answer could not be generated.'}</span>
+                          <span className="text-destructive">{message.state === 'cancelled' ? 'Answer stopped.' : message.error_code === 'generation_timeout' ? 'The answer timed out. Please retry.' : message.error_code === 'grounding_failed' ? 'The answer could not be verified against the evidence.' : 'The answer could not be generated. Please retry.'}</span>
                           {message.retry && <Button onClick={() => void sendQuestion(message.retry?.content, message.retry?.documentIds)} size="sm" variant="outline">Retry</Button>}
                           {failedQuestion && <Button onClick={() => void sendQuestion(message.content, message.document_ids)} size="sm" variant="outline">Retry</Button>}
                         </div>
                       )}
                       {message.role === 'assistant' && message.citations.length > 0 && (
-                        <div className="mt-4 flex flex-wrap gap-2">
+                        <div className="citation-list">
                           {message.citations.map((citation) => (
-                            <button className="rounded-full border border-border bg-background px-3 py-1.5 text-left text-xs font-medium hover:bg-muted" key={`${citation.chunk_id}-${citation.excerpt}`} onClick={() => void openPassage(citation.chunk_id)}>
+                            <button className="citation-control" key={`${citation.chunk_id}-${citation.excerpt}`} onClick={() => void openPassage(citation.chunk_id)}>
                               {citation.document_name} · {citation.filing_type ?? citation.source_type.toUpperCase()}{citation.filing_date ? ` · ${dateFormatter.format(new Date(`${citation.filing_date}T00:00:00`))}` : ''}{citationLocation(citation) ? ` · ${citationLocation(citation)}` : ''}
                             </button>
                           ))}
@@ -417,7 +396,7 @@ export function ChatPage({ session }: ChatPageProps) {
                 })}
               </div>
 
-              <form className="mt-10 border-t border-border pt-6" onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); void sendQuestion() }}>
+              <form className="question-composer" onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); void sendQuestion() }}>
                 <div className="flex flex-wrap items-center gap-3">
                   <label className="text-sm font-semibold" htmlFor="scope">Search scope</label>
                   <select className="rounded-lg border border-input bg-background px-3 py-2 text-sm" id="scope" onChange={(event) => setScope(event.target.value as 'all' | 'selected')} value={scope}>
@@ -445,7 +424,6 @@ export function ChatPage({ session }: ChatPageProps) {
             </>
           )}
         </section>
-      </div>
 
       <dialog className="m-0 ml-auto h-dvh w-full max-w-xl border-0 bg-card p-0 text-foreground shadow-[-12px_0_40px_rgb(26_33_53_/_0.18)] backdrop:bg-foreground/25" onClose={closePassage} ref={passageDialog}>
         <section className="flex h-full flex-col" aria-labelledby="passage-title">
@@ -455,7 +433,7 @@ export function ChatPage({ session }: ChatPageProps) {
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
             {passageError && <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-900" role="alert">{passageError}</p>}
-            {!passage && !passageError && <p className="text-sm text-muted-foreground">Loading cited evidence…</p>}
+            {!passage && !passageError && <div className="passage-loading" aria-label="Loading cited evidence"><span className="skeleton skeleton-line" /><span className="skeleton skeleton-line" /><span className="skeleton skeleton-short" /></div>}
             {passage && <>
               <p className="text-sm text-muted-foreground">{passage.filing_type ?? passage.source_type.toUpperCase()}{passage.filing_date ? ` · ${dateFormatter.format(new Date(`${passage.filing_date}T00:00:00`))}` : ''}{passage.page_numbers.length ? ` · p. ${passage.page_numbers.join(', ')}` : ''}{passage.section ? ` · ${passage.section}` : ''}</p>
               <p className="mt-5 whitespace-pre-wrap text-sm leading-7">{passage.text}</p>
@@ -465,6 +443,6 @@ export function ChatPage({ session }: ChatPageProps) {
           {passage?.original_url && <footer className="border-t border-border px-6 py-4"><Button asChild><a href={passage.original_url} rel="noreferrer" target="_blank">Open original PDF</a></Button></footer>}
         </section>
       </dialog>
-    </main>
+    </WorkspaceShell>
   )
 }

@@ -5,9 +5,11 @@ from typing import Any
 from uuid import UUID
 
 import structlog
+from anyio import move_on_after
 from fastapi import Request
+from pydantic_ai.exceptions import UnexpectedModelBehavior
 
-from app.assistant.agent import answer_agent, build_prompt
+from app.assistant.agent import answer_agent, bounded_evidence, build_prompt
 from app.auth.current_user import CurrentUser
 from app.chat.streaming import (
     AnswerEvent,
@@ -18,14 +20,14 @@ from app.chat.streaming import (
     encode_event,
 )
 from app.config import settings
+from app.database.activity import record_activity
 from app.database.chats import complete_turn, completed_history, finish_failed_turn
 from app.grounding.models import (
-    GroundedAnswer,
     SourcePassage,
     insufficient_evidence_answer,
 )
 from app.grounding.validator import validate_grounded_answer
-from app.retrieval.retriever import DocumentRetriever
+from app.retrieval.retriever import DocumentRetriever, contextual_question
 
 logger = structlog.get_logger()
 
@@ -42,6 +44,7 @@ def _metadata(
 ) -> dict[str, Any]:
     values: dict[str, Any] = {
         "request_id": str(request_id),
+        "model": settings.ollama_chat_model,
         "retrieved_chunk_ids": [str(passage.chunk_id) for passage in passages],
         "retrieved_chunk_count": len(passages),
         "elapsed_ms": elapsed_ms,
@@ -72,89 +75,76 @@ async def stream_turn(
 ) -> AsyncIterator[str]:
     started = perf_counter()
     retriever = retriever or DocumentRetriever()
-    streamed = None
+    passages = []
+    generation = None
+    stage = "retrieving"
     try:
-        yield encode_event("status", StatusEvent(phase="persisted"))
-        yield encode_event("status", StatusEvent(phase="retrieving"))
-        passages = await retriever.search(content, document_ids)
-        await _check_disconnected(request)
-        if not passages:
-            answer = insufficient_evidence_answer()
+        async with asyncio.timeout(settings.chat_turn_timeout_seconds):
+            yield encode_event("status", StatusEvent(phase="persisted"))
+            await _check_disconnected(request)
+            history = await completed_history(user.id, thread_id, settings.chat_history_message_limit)
+            question = contextual_question(content, history)
+            yield encode_event("status", StatusEvent(phase="retrieving"))
+            passages = bounded_evidence(question, await retriever.search(question, document_ids))
+            await _check_disconnected(request)
+            usage = None
+            if passages:
+                stage = "generating"
+                generation = asyncio.create_task(answer_agent.run(
+                    build_prompt(question, (), passages), deps=passages
+                ))
+                try:
+                    while not generation.done():
+                        yield encode_event("status", StatusEvent(phase="generating"))
+                        await asyncio.wait({generation}, timeout=1)
+                        await _check_disconnected(request)
+                    result = await generation
+                finally:
+                    if not generation.done():
+                        generation.cancel()
+                    with move_on_after(10, shield=True):
+                        await asyncio.gather(generation, return_exceptions=True)
+                answer = validate_grounded_answer(result.output, passages)
+                usage = result.usage
+            else:
+                answer = insufficient_evidence_answer()
+            await _check_disconnected(request)
+            stage = "persisting"
             yield encode_event("status", StatusEvent(phase="persisting"))
             assistant_message_id = await complete_turn(
+                user.id, thread_id, user_message_id, answer,
+                _metadata(request_id, passages, int((perf_counter() - started) * 1000), usage),
+            )
+            await record_activity(
                 user.id,
+                "answer_refused" if answer.insufficient_evidence else "answer_completed",
+                "Not enough evidence to answer" if answer.insufficient_evidence else "Answer completed",
                 thread_id,
-                user_message_id,
-                answer,
-                _metadata(request_id, passages, int((perf_counter() - started) * 1000)),
             )
+            yield encode_event("answer", AnswerEvent(text=answer.answer))
             yield encode_event("citations", CitationsEvent(citations=answer.citations))
-            yield encode_event(
-                "complete",
-                CompleteEvent(
-                    user_message_id=user_message_id,
-                    assistant_message_id=assistant_message_id,
-                    request_id=request_id,
-                    insufficient_evidence=answer.insufficient_evidence,
-                ),
+            yield encode_event("complete", CompleteEvent(
+                user_message_id=user_message_id, assistant_message_id=assistant_message_id,
+                request_id=request_id, insufficient_evidence=answer.insufficient_evidence,
+            ))
+    except (asyncio.CancelledError, ClientDisconnected) as error:
+        with move_on_after(10, shield=True):
+            await finish_failed_turn(user.id, thread_id, user_message_id, "cancelled", "client_disconnected")
+            await record_activity(user.id, "answer_cancelled", "Answer generation stopped", thread_id)
+        if isinstance(error, asyncio.CancelledError):
+            raise
+    except Exception as error:
+        code = "generation_failed"
+        message = "Unable to generate an answer. Please try again."
+        if isinstance(error, TimeoutError):
+            code, message = "generation_timeout", "The answer took too long. Please retry with a narrower question."
+        elif isinstance(error, (UnexpectedModelBehavior, ValueError)):
+            code, message = "grounding_failed", "The answer could not be verified against the evidence after correction."
+        logger.exception("chat_generation_failed", request_id=str(request_id), stage=stage, code=code)
+        with move_on_after(10, shield=True):
+            await finish_failed_turn(
+                user.id, thread_id, user_message_id, "failed", code,
+                {**_metadata(request_id, passages, int((perf_counter() - started) * 1000)), "stage": stage},
             )
-            return
-
-        history = await completed_history(user.id, thread_id, settings.chat_history_message_limit)
-        yield encode_event("status", StatusEvent(phase="generating"))
-        async with answer_agent.run_stream(build_prompt(content, history, passages)) as streamed:
-            async for partial in streamed.stream_output(debounce_by=0):
-                await _check_disconnected(request)
-                yield encode_event("answer", AnswerEvent(text=partial.answer))
-            answer: GroundedAnswer = await streamed.get_output()
-            usage = streamed.usage
-
-        try:
-            answer = validate_grounded_answer(answer, passages)
-        except ValueError as error:
-            logger.warning("grounding_validation_failed", request_id=str(request_id), reason=str(error))
-            await finish_failed_turn(user.id, thread_id, user_message_id, "failed", "grounding_failed")
-            yield encode_event(
-                "error",
-                ErrorEvent(code="grounding_failed", message="The generated answer could not be grounded."),
-            )
-            return
-        yield encode_event("status", StatusEvent(phase="persisting"))
-        assistant_message_id = await complete_turn(
-            user.id,
-            thread_id,
-            user_message_id,
-            answer,
-            _metadata(request_id, passages, int((perf_counter() - started) * 1000), usage),
-        )
-        yield encode_event("citations", CitationsEvent(citations=answer.citations))
-        yield encode_event(
-            "complete",
-                CompleteEvent(
-                    user_message_id=user_message_id,
-                    assistant_message_id=assistant_message_id,
-                    request_id=request_id,
-                    insufficient_evidence=answer.insufficient_evidence,
-            ),
-        )
-    except asyncio.CancelledError:
-        if streamed is not None:
-            await streamed.cancel()
-        await finish_failed_turn(user.id, thread_id, user_message_id, "cancelled", "client_disconnected")
-        raise
-    except ClientDisconnected:
-        if streamed is not None:
-            await streamed.cancel()
-        await finish_failed_turn(user.id, thread_id, user_message_id, "cancelled", "client_disconnected")
-    except Exception:
-        logger.exception(
-            "chat_generation_failed",
-            request_id=str(request_id),
-            thread_id=str(thread_id),
-            user_id=str(user.id),
-        )
-        await finish_failed_turn(user.id, thread_id, user_message_id, "failed", "generation_failed")
-        yield encode_event(
-            "error",
-            ErrorEvent(code="generation_failed", message="Unable to generate an answer. Please try again."),
-        )
+            await record_activity(user.id, "answer_failed", message, thread_id)
+        yield encode_event("error", ErrorEvent(code=code, message=message))

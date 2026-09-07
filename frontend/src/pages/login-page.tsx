@@ -38,24 +38,32 @@ export function LoginPage({ session }: LoginPageProps) {
 
   return (
     <main className="auth-shell">
-      <section className="auth-panel" aria-labelledby="login-title">
-        <p className="wordmark">Driftwood Capital</p>
-        <h1 id="login-title">Document Copilot</h1>
-        <p className="auth-intro">Grounded answers from the filings your team trusts.</p>
-        <form className="auth-form" onSubmit={submit}>
-          <label htmlFor="email">Work email</label>
-          <input id="email" name="email" type="email" autoComplete="email" required />
-          <label htmlFor="password">Password</label>
-          <input id="password" name="password" type="password" autoComplete={isSignUp ? 'new-password' : 'current-password'} minLength={6} required />
-          {error && <p className="form-error" role="alert">{error}</p>}
-          <Button className="auth-submit" size="lg" disabled={isSubmitting} type="submit">
-            {isSubmitting ? 'Please wait…' : isSignUp ? 'Create account' : 'Sign in'}
-          </Button>
-        </form>
-        <button className="auth-switch" onClick={() => setIsSignUp((value) => !value)} type="button">
-          {isSignUp ? 'Already have an account? Sign in' : 'Need an account? Sign up'}
-        </button>
-      </section>
+      <div className="auth-frame">
+        <section className="auth-aside" aria-label="Document Copilot">
+          <p className="wordmark">Driftwood Capital</p>
+          <h1>Find the line. Verify the claim.</h1>
+          <p>Document Copilot keeps each answer tied to the filing passage that supports it.</p>
+          <div className="auth-evidence"><span>Evidence stays attached</span><strong>Filing → page → passage</strong></div>
+        </section>
+        <section className="auth-panel" aria-labelledby="login-title">
+          <p className="auth-panel-label">Analyst access</p>
+          <h2 id="login-title">{isSignUp ? 'Create your account' : 'Sign in to your workspace'}</h2>
+          <p className="auth-intro">Use your Driftwood work email address.</p>
+          <form className="auth-form" onSubmit={submit}>
+            <label htmlFor="email">Work email</label>
+            <input id="email" name="email" type="email" autoComplete="email" required />
+            <label htmlFor="password">Password</label>
+            <input id="password" name="password" type="password" autoComplete={isSignUp ? 'new-password' : 'current-password'} minLength={6} required />
+            {error && <p className="form-error" role="alert">{error}</p>}
+            <Button className="auth-submit" size="lg" disabled={isSubmitting} type="submit">
+              {isSubmitting ? 'Please wait…' : isSignUp ? 'Create account' : 'Sign in'}
+            </Button>
+          </form>
+          <button className="auth-switch" onClick={() => setIsSignUp((value) => !value)} type="button">
+            {isSignUp ? 'Already have an account? Sign in' : 'Need an account? Sign up'}
+          </button>
+        </section>
+      </div>
     </main>
   )
 }

@@ -4,6 +4,7 @@ import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.activity import router as activity_router
 from app.api.chat import passage_router
 from app.api.chat import router as chat_router
 from app.api.documents import router as documents_router
@@ -23,6 +24,7 @@ app.add_middleware(
 app.include_router(documents_router)
 app.include_router(chat_router)
 app.include_router(passage_router)
+app.include_router(activity_router)
 
 
 @app.middleware("http")

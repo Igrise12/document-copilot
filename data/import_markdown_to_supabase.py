@@ -47,7 +47,14 @@ def get_owner_id(client, email: str) -> UUID:
     return UUID(str(matches[0].id))
 
 
-def import_document(client, owner_id: UUID, filing: dict[str, str]) -> ImportedDocument:
+def import_document(
+    client,
+    owner_id: UUID,
+    filing: dict[str, str],
+    *,
+    reindex: bool = False,
+    resume: bool = False,
+) -> ImportedDocument:
     relative_path = Path(filing["local_path"])
     if relative_path.is_absolute() or ".." in relative_path.parts:
         raise ValueError(f"unsafe manifest path: {relative_path}")
@@ -59,12 +66,16 @@ def import_document(client, owner_id: UUID, filing: dict[str, str]) -> ImportedD
     )
     existing = (
         client.table("source_documents")
-        .select("status")
+        .select("status,retrieval_version")
         .eq("id", str(document_id))
         .maybe_single()
         .execute()
     )
-    if existing and existing.data["status"] == DocumentStatus.READY.value:
+    if (
+        existing
+        and existing.data["status"] == DocumentStatus.READY.value
+        and (not reindex or (resume and existing.data.get("retrieval_version", 1) > 1))
+    ):
         return ImportedDocument(document_id, is_ready=True)
 
     storage_path = f"{owner_id}/sec/{relative_path.as_posix()}"
@@ -73,25 +84,28 @@ def import_document(client, owner_id: UUID, filing: dict[str, str]) -> ImportedD
         content,
         {"content-type": "text/markdown", "upsert": "true"},
     )
+    record = {
+        "id": str(document_id),
+        "owner_id": str(owner_id),
+        "original_filename": filing["primary_document"],
+        "storage_path": storage_path,
+        "source_type": "html",
+        "company_name": COMPANY_NAMES.get(filing["ticker"]),
+        "ticker": filing["ticker"],
+        "filing_type": filing["form"],
+        "filing_date": filing["filing_date"],
+        "fiscal_year": int(relative_path.parts[0]),
+        "accession_number": filing["accession_number"],
+        "source_url": filing["source_url"],
+        "normalized_content": content.decode("utf-8"),
+        "status": "uploaded",
+        "failure_detail": None,
+    }
+    if existing:
+        record["retrieval_version"] = existing.data.get("retrieval_version", 1) + int(reindex)
     try:
         client.table("source_documents").upsert(
-            {
-                "id": str(document_id),
-                "owner_id": str(owner_id),
-                "original_filename": filing["primary_document"],
-                "storage_path": storage_path,
-                "source_type": "html",
-                "company_name": COMPANY_NAMES.get(filing["ticker"]),
-                "ticker": filing["ticker"],
-                "filing_type": filing["form"],
-                "filing_date": filing["filing_date"],
-                "fiscal_year": int(relative_path.parts[0]),
-                "accession_number": filing["accession_number"],
-                "source_url": filing["source_url"],
-                "normalized_content": content.decode("utf-8"),
-                "status": "uploaded",
-                "failure_detail": None,
-            },
+            record,
             on_conflict="id",
         ).execute()
     except Exception:
@@ -129,6 +143,8 @@ async def run_import(
     accession_number: str | None,
     all_filings: bool,
     max_chunks: int | None,
+    reindex: bool,
+    resume: bool,
 ) -> int:
     create_chunker()
     client = service_role_client()
@@ -137,11 +153,12 @@ async def run_import(
         {"id": str(owner_id), "email": owner_email}, on_conflict="id"
     ).execute()
 
-    imported = [
-        import_document(client, owner_id, filing)
-        for filing in selected_filings(accession_number, all_filings)
-    ]
-    for document in imported:
+    imported = []
+    for filing in selected_filings(accession_number, all_filings):
+        document = import_document(
+            client, owner_id, filing, reindex=reindex, resume=resume
+        )
+        imported.append(document)
         if document.is_ready:
             continue
         await process_document(
@@ -164,6 +181,16 @@ if __name__ == "__main__":
     selection.add_argument("--all", action="store_true")
     parser.add_argument("--max-chunks", type=int)
     parser.add_argument("--confirm-all", action="store_true")
+    parser.add_argument(
+        "--reindex",
+        action="store_true",
+        help="create a new retrieval version for existing filings",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="skip filings whose newer retrieval version is already ready",
+    )
     args = parser.parse_args()
     if args.all and not args.confirm_all:
         parser.error("--all requires --confirm-all")
@@ -173,6 +200,13 @@ if __name__ == "__main__":
         parser.error("--max-chunks must be positive")
 
     count = asyncio.run(
-        run_import(args.owner_email, args.accession_number, args.all, args.max_chunks)
+        run_import(
+            args.owner_email,
+            args.accession_number,
+            args.all,
+            args.max_chunks,
+            args.reindex,
+            args.resume,
+        )
     )
     print(f"Processed {count} Markdown document(s)")

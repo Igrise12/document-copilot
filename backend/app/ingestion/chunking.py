@@ -1,3 +1,4 @@
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from hashlib import sha256
@@ -11,6 +12,7 @@ from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.transforms.chunker.tokenizer.base import BaseTokenizer
 
 from app.config import settings
+from app.ingestion.tables import compact_table
 
 
 @dataclass(frozen=True)
@@ -36,6 +38,91 @@ class Utf8ByteTokenizer(BaseTokenizer):
 
     def get_tokenizer(self) -> Callable[[str], int]:
         return self.count_tokens
+
+
+def _fits(text: str, limit: int) -> bool:
+    return len(text.encode("utf-8")) <= limit
+
+
+def _split_lines(lines: list[str], prefix: str, limit: int) -> list[str]:
+    chunks: list[str] = []
+    current = prefix
+    for line in lines:
+        if not _fits(f"{prefix}\n{line}", limit):
+            raise ValueError("A row and its context exceed the safe byte budget")
+        candidate = f"{current}\n{line}" if current else line
+        if current and not _fits(candidate, limit):
+            chunks.append(current)
+            current = f"{prefix}\n{line}" if prefix else line
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _markdown_chunks(content: str) -> list[tuple[str, str]]:
+    limit = settings.ingestion_chunk_max_bytes
+    section = "Document body"
+    previous = ""
+    chunks: list[tuple[str, str]] = []
+    for block in (block.strip() for block in content.split("\n\n")):
+        if not block:
+            continue
+        if block.startswith("#"):
+            section = block.lstrip("#").strip() or section
+            previous = section
+            continue
+        lines = block.splitlines()
+        is_table = all(line.lstrip().startswith("|") for line in lines)
+        if len(lines) == 1 and len(block) < 120 and not block.endswith((".", ":", ";")):
+            section = block
+            previous = block
+            continue
+        prefix = section
+        if is_table:
+            lines = compact_table(lines)
+            if previous and previous != section:
+                prefix = f"{section}\n{previous[-800:]}"
+            header = lines[:2]
+            rows = lines[2:]
+            # SEC exports often put the actual year labels below the separator.
+            while rows and re.fullmatch(r"[|\s\d%():.,/-]*(?:Change[|\s\d%():.,/-]*)*", rows[0]):
+                header.append(rows.pop(0))
+            table_prefix = f"{prefix}\n{'\n'.join(header)}"
+            chunks.extend((section, text) for text in _split_lines(rows, table_prefix, limit))
+        else:
+            chunks.extend((section, text) for text in _split_lines(lines, prefix, limit))
+        if not is_table:
+            previous = block
+    return chunks
+
+
+def chunk_markdown(content: bytes) -> tuple[str, list[TextChunk]]:
+    normalized_content = content.decode("utf-8")
+    chunks = []
+    for position, (section, text) in enumerate(_markdown_chunks(normalized_content)):
+        chunks.append(
+            TextChunk(
+                position=position,
+                text=text,
+                page_number=None,
+                section=section,
+                source_offset_start=None,
+                source_offset_end=None,
+                token_count=len(text.encode("utf-8")),
+                metadata_json={
+                    "doc_item_refs": [],
+                    "headings": [section],
+                    "page_numbers": [],
+                    "length_unit": "utf8_bytes",
+                    "text_hash": sha256(text.encode()).hexdigest(),
+                },
+            )
+        )
+    if not chunks:
+        raise ValueError("Document contains no chunkable text")
+    return normalized_content, chunks
 
 
 def _converter() -> DocumentConverter:
@@ -97,6 +184,8 @@ def chunk_docling_document(document: Any, chunker: Any) -> tuple[str, list[TextC
 
 
 def chunk_document(content: bytes, filename: str) -> tuple[str, list[TextChunk]]:
+    if filename.lower().endswith((".md", ".markdown")):
+        return chunk_markdown(content)
     document = _converter().convert(
         DocumentStream(name=filename, stream=BytesIO(content))
     ).document

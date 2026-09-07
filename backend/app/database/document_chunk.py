@@ -17,6 +17,7 @@ class DocumentChunk(Base):
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     document_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("source_documents.id", ondelete="CASCADE"))
+    retrieval_version: Mapped[int] = mapped_column(Integer, default=1)
     position: Mapped[int] = mapped_column(Integer)
     text: Mapped[str] = mapped_column(Text)
     page_number: Mapped[int | None]

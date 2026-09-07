@@ -1,13 +1,12 @@
 import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import type { Session } from '@supabase/supabase-js'
-import { FileText, MessageSquare, LogOut, RotateCcw, Trash2, Upload } from 'lucide-react'
+import { FileText, RotateCcw, Trash2, Upload } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { WorkspaceShell } from '@/components/workspace-shell'
 import { api } from '@/lib/api'
 import { env } from '@/lib/env'
 import { ApiError } from '@/lib/http'
-import { supabase } from '@/lib/supabase'
 
 type DocumentStatus = 'uploaded' | 'processing' | 'ready' | 'failed'
 
@@ -44,7 +43,6 @@ function messageFrom(error: unknown): string {
 }
 
 export function DocumentsPage({ session }: DocumentsPageProps) {
-  const navigate = useNavigate()
   const documentsRef = useRef<DocumentSummary[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadControllerRef = useRef<AbortController | null>(null)
@@ -197,30 +195,18 @@ export function DocumentsPage({ session }: DocumentsPageProps) {
     }
   }
 
-  async function signOut() {
-    await supabase.auth.signOut()
-    navigate('/login', { replace: true })
-  }
-
   return (
-    <main className="mx-auto min-h-screen w-full max-w-6xl px-5 pb-16 sm:px-8">
-      <header className="flex min-h-20 items-center justify-between border-b border-border">
-        <p className="m-0 text-xs font-semibold uppercase tracking-[0.08em] text-primary">Driftwood Capital</p>
-        <div className="flex items-center gap-3">
-          <span className="hidden text-sm text-muted-foreground sm:inline">{session.user.email}</span>
-          <Button onClick={() => navigate('/chat')} variant="outline"><MessageSquare />Ask questions</Button>
-          <Button onClick={signOut} variant="outline"><LogOut />Sign out</Button>
-        </div>
-      </header>
-
-      <section className="mt-14 max-w-3xl" aria-labelledby="documents-title">
+    <WorkspaceShell session={session}>
+      <section className="workspace-page documents-page" aria-labelledby="documents-title">
+      <div className="page-heading">
+          <p className="page-kicker">Shared corpus</p>
         <h1 id="documents-title">Documents</h1>
-        <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground">
+        <p>
           The shared research corpus is ready for chat. Upload a PDF only when you need to add a filing.
         </p>
-      </section>
+      </div>
 
-      <form className="mt-10 rounded-xl bg-card p-5 shadow-[0_14px_38px_rgb(26_33_53_/_0.09)] sm:p-7" onSubmit={submitUpload}>
+      <form className="document-upload" onSubmit={submitUpload}>
         <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
           <div className="min-w-0 flex-1">
             <label className="block text-sm font-semibold" htmlFor="filing">Upload a filing <span className="font-normal text-muted-foreground">optional</span></label>
@@ -270,7 +256,7 @@ export function DocumentsPage({ session }: DocumentsPageProps) {
         {loadError && <p className="mt-5 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-900" role="alert">{loadError}</p>}
         {actionError && <p className="mt-5 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-900" role="alert">{actionError}</p>}
         {isLoading ? (
-          <p className="mt-8 text-sm text-muted-foreground">Loading the research corpus…</p>
+          <div className="document-skeletons" aria-label="Loading the research corpus">{[1, 2, 3, 4].map((item) => <div key={item}><span className="skeleton skeleton-line" /><span className="skeleton skeleton-short" /></div>)}</div>
         ) : documents.length === 0 ? (
           <div className="mt-8 border-y border-border py-12 text-center">
             <FileText className="mx-auto size-7 text-muted-foreground" aria-hidden="true" />
@@ -320,6 +306,7 @@ export function DocumentsPage({ session }: DocumentsPageProps) {
         )}
       </section>
       <p className="sr-only" aria-live="polite">{announcement}</p>
-    </main>
+      </section>
+    </WorkspaceShell>
   )
 }

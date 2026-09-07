@@ -50,6 +50,43 @@ def test_validator_accepts_citations_to_retrieved_chunks() -> None:
     assert validated.citations[0].filing_date == date(2026, 1, 31)
 
 
+def test_validator_accepts_a_table_currency_value_without_a_repeated_dollar_symbol() -> None:
+    answer = GroundedAnswer(answer="Revenue was $100 million.", citations=(citation(),))
+    table = passage().model_copy(update={"text": "($ in millions)\nRevenue 100"})
+
+    assert validate_grounded_answer(answer, [table]).answer == answer.answer
+
+
+def test_validator_accepts_a_dollars_in_millions_table_value() -> None:
+    answer = GroundedAnswer(answer="Revenue was $100 million.", citations=(citation(),))
+    table = passage().model_copy(update={"text": "Dollars in millions\nRevenue 100"})
+
+    assert validate_grounded_answer(answer, [table]).answer == answer.answer
+
+
+def test_validator_accepts_a_financial_table_value_with_an_implicit_currency_unit() -> None:
+    answer = GroundedAnswer(answer="Net sales were $100 million.", citations=(citation(),))
+    table = passage().model_copy(update={"text": "Net sales (in millions)\n100"})
+
+    assert validate_grounded_answer(answer, [table]).answer == answer.answer
+
+
+def test_validator_does_not_treat_share_counts_as_currency() -> None:
+    answer = GroundedAnswer(answer="Weighted average shares were $100 million.", citations=(citation(),))
+    table = passage().model_copy(update={"text": "Weighted average shares (in millions)\n100"})
+
+    with pytest.raises(ValueError, match="currency"):
+        validate_grounded_answer(answer, [table])
+
+
+def test_validator_preserves_a_negative_table_currency_value() -> None:
+    answer = GroundedAnswer(answer="Net income was $100 million.", citations=(citation(),))
+    table = passage().model_copy(update={"text": "($ in millions)\nNet income -100"})
+
+    with pytest.raises(ValueError, match="currency"):
+        validate_grounded_answer(answer, [table])
+
+
 def test_validator_rejects_non_retrieved_citations() -> None:
     answer = GroundedAnswer(
         answer="Revenue was $100.",
@@ -73,43 +110,12 @@ def test_validator_uses_metadata_from_the_retrieved_chunk() -> None:
     assert validated.citations[0].section == "Revenue"
 
 
-def test_validator_rejects_excerpt_mismatches() -> None:
+def test_validator_replaces_a_model_excerpt_with_the_retrieved_passage() -> None:
     answer = GroundedAnswer(answer="Revenue was $100.", citations=(citation(excerpt="Not present"),))
 
-    with pytest.raises(ValueError, match="excerpt"):
-        validate_grounded_answer(answer, [passage()])
+    validated = validate_grounded_answer(answer, [passage()])
 
-
-def test_validator_rejects_punctuation_only_excerpts() -> None:
-    answer = GroundedAnswer(answer="Revenue was $100.", citations=(citation(excerpt="..."),))
-
-    with pytest.raises(ValueError, match="excerpt"):
-        validate_grounded_answer(answer, [passage()])
-
-
-def test_validator_rejects_an_invalid_citation_even_with_a_valid_one() -> None:
-    answer = GroundedAnswer(
-        answer="Revenue was $100.",
-        citations=(
-            citation(excerpt="Revenue was $100."),
-            citation(excerpt="Revenue was $999."),
-        ),
-    )
-
-    with pytest.raises(ValueError, match="excerpt"):
-        validate_grounded_answer(answer, [passage()])
-
-
-def test_validator_accepts_ocr_punctuation_variants() -> None:
-    ocr_passage = passage().model_copy(update={"text": "Total revenue, = $. Total revenue, = 60,922."})
-    answer = GroundedAnswer(
-        answer="Revenue was $60,922 million.",
-        citations=(citation(excerpt="Total revenue, = $60,922."),),
-    )
-
-    validated = validate_grounded_answer(answer, [ocr_passage])
-
-    assert len(validated.citations) == 1
+    assert validated.citations[0].excerpt == "Revenue was $100."
 
 
 def test_insufficient_evidence_has_no_citations() -> None:
@@ -119,5 +125,22 @@ def test_insufficient_evidence_has_no_citations() -> None:
 
 
 def test_grounded_answer_requires_a_citation_at_the_model_boundary() -> None:
-    with pytest.raises(ValidationError, match="grounded answers require citations"):
+    with pytest.raises(ValidationError, match="Field required"):
         GroundedAnswer(answer="Revenue was $100.")
+
+
+@pytest.mark.parametrize('source,answer', [
+    ('Net income was -$100.', 'Net income was $100.'),
+    ('Net income was ($100).', 'Net income was $100.'),
+])
+def test_validator_preserves_financial_signs(source, answer) -> None:
+    answer = GroundedAnswer(answer=answer, citations=(citation(),))
+    with pytest.raises(ValueError, match='currency'):
+        validate_grounded_answer(answer, [passage().model_copy(update={'text': source})])
+
+
+def test_validator_rejects_an_answer_currency_figure_missing_from_its_citation() -> None:
+    answer = GroundedAnswer(answer='Revenue was $999.', citations=(citation(),))
+
+    with pytest.raises(ValueError, match='currency'):
+        validate_grounded_answer(answer, [passage()])

@@ -19,11 +19,14 @@ class Settings(BaseSettings):
     ollama_chat_model: str
     ollama_embedding_model: str
     ollama_embedding_dimensions: int
-    ingestion_chunk_max_bytes: int = 512
+    ingestion_chunk_max_bytes: int = 4096
+    ollama_embedding_max_input_bytes: int = 2048
     ollama_embedding_batch_size: int = 16
     ollama_timeout_seconds: float = 120
     chat_history_message_limit: int = 12
-    chat_max_output_tokens: int = 2048
+    chat_max_output_tokens: int = 1024
+    chat_prompt_max_bytes: int = 10000
+    chat_turn_timeout_seconds: float = 180
     signed_url_ttl_seconds: int = 600
     retrieval_semantic_candidate_limit: int = 20
     retrieval_lexical_candidate_limit: int = 20
@@ -67,10 +70,13 @@ class Settings(BaseSettings):
         "max_upload_bytes",
         "ollama_embedding_dimensions",
         "ingestion_chunk_max_bytes",
+        "ollama_embedding_max_input_bytes",
         "ollama_embedding_batch_size",
         "ollama_timeout_seconds",
         "chat_history_message_limit",
         "chat_max_output_tokens",
+        "chat_prompt_max_bytes",
+        "chat_turn_timeout_seconds",
         "signed_url_ttl_seconds",
         "retrieval_semantic_candidate_limit",
         "retrieval_lexical_candidate_limit",

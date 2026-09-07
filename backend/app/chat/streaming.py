@@ -27,7 +27,7 @@ class CompleteEvent(BaseModel):
 
 
 class ErrorEvent(BaseModel):
-    code: Literal["generation_failed", "grounding_failed"]
+    code: Literal["generation_failed", "grounding_failed", "generation_timeout"]
     message: str
 
 

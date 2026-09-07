@@ -6,6 +6,7 @@ from app.config import settings
 from app.ingestion.chunking import (
     Utf8ByteTokenizer,
     chunk_docling_document,
+    chunk_document,
     create_chunker,
 )
 
@@ -93,3 +94,23 @@ def test_create_chunker_uses_local_byte_tokenizer(monkeypatch) -> None:
 
     assert isinstance(tokenizer, Utf8ByteTokenizer)
     assert tokenizer.max_tokens == settings.ingestion_chunk_max_bytes
+
+
+def test_markdown_chunking_keeps_financial_table_rows_intact() -> None:
+    _, chunks = chunk_document(
+        b"# Segment information\n\nOperating income by segment\n\n| Segment | Net sales | Operating income |\n|---|---:|---:|\n| AWS | 80,096 | 24,631 |\n",
+        "filing.md",
+    )
+
+    assert len(chunks) == 1
+    assert "| AWS | 80,096 | 24,631 |" in chunks[0].text
+
+
+def test_split_table_keeps_year_headers_without_intro(monkeypatch) -> None:
+    monkeypatch.setattr(settings, 'ingestion_chunk_max_bytes', 140)
+    table = '# Revenue\n\n| Metric | 2024 | 2023 |\n| --- | --- | --- |\n'
+    table += '\n'.join(f'| Product {i} | 100 | 90 |' for i in range(10))
+    _, chunks = chunk_document(table.encode(), 'filing.md')
+    assert len(chunks) > 1
+    assert all('2024' in chunk.text for chunk in chunks)
+    assert all(len(chunk.text.encode()) <= 140 for chunk in chunks)

@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from app.auth.current_user import CurrentUser, current_user
 from app.config import settings
+from app.database.activity import record_activity
 from app.database.base import DocumentStatus, SourceType
 from app.database.documents import (
     create_document,
@@ -68,6 +69,7 @@ async def upload_document(
         filing_type.strip() or None if filing_type else None,
         filing_date,
     )
+    await record_activity(user.id, "document_uploaded", document["original_filename"], UUID(str(document["id"])))
     background_tasks.add_task(process_document, document["id"], str(user.id))
     return {**document, "can_manage": True}
 
@@ -98,6 +100,7 @@ async def retry(
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
         raise HTTPException(status.HTTP_409_CONFLICT, "Only failed documents can be retried")
 
+    await record_activity(user.id, "document_retried", document["original_filename"], document_id)
     background_tasks.add_task(process_document, document["id"], str(user.id))
     return {**document, "can_manage": True}
 
@@ -106,8 +109,10 @@ async def retry(
 async def delete(
     document_id: UUID, user: Annotated[CurrentUser, Depends(current_user)]
 ) -> Response:
-    if not await delete_document(user.id, document_id):
+    document = await delete_document(user.id, document_id)
+    if document is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
+    await record_activity(user.id, "document_deleted", document["original_filename"], document_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

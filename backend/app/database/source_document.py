@@ -26,6 +26,7 @@ class SourceDocument(Timestamped, Base):
     accession_number: Mapped[str | None] = mapped_column(String)
     source_url: Mapped[str | None] = mapped_column(String)
     normalized_content: Mapped[str | None] = mapped_column(Text)
+    retrieval_version: Mapped[int] = mapped_column(default=1)
     status: Mapped[DocumentStatus] = mapped_column(SqlEnum(DocumentStatus, name="document_status"), default=DocumentStatus.UPLOADED)
     failure_detail: Mapped[str | None] = mapped_column(Text)
 

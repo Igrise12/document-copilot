@@ -217,7 +217,9 @@ Seluruh nilai dibaca dari `config.py`; lihat `backend/.env.example` untuk format
   query retrieval melalui endpoint Ollama `/api/embed`.
 - `CHAT_HISTORY_MESSAGE_LIMIT`: jumlah pesan selesai yang dapat dipakai sebagai
   konteks percakapan; default `12`.
-- `CHAT_MAX_OUTPUT_TOKENS`: batas output jawaban Ollama; default `2048`.
+- `CHAT_MAX_OUTPUT_TOKENS`: batas output jawaban Ollama; default `512`.
+- `CHAT_PROMPT_MAX_BYTES`: batas evidence yang dikirim ke model; default `10000`.
+- `CHAT_TURN_TIMEOUT_SECONDS`: batas seluruh retrieval dan generation; default `180`.
 - `RETRIEVAL_*`: batas candidate, hasil akhir, dan bobot RRF.
 
 Jangan membaca environment variable langsung dari route atau service baru. Tambahkan

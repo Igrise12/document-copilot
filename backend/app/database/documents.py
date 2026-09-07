@@ -95,11 +95,11 @@ async def retry_document(owner_id: UUID, document_id: UUID) -> dict[str, Any] | 
     return response.data[0] if response.data else None
 
 
-async def delete_document(owner_id: UUID, document_id: UUID) -> bool:
+async def delete_document(owner_id: UUID, document_id: UUID) -> dict[str, Any] | None:
     client = await async_service_role_client()
     response = await (
         client.table("source_documents")
-        .select("storage_path")
+        .select("storage_path,original_filename")
         .eq("owner_id", str(owner_id))
         .eq("id", str(document_id))
         .maybe_single()
@@ -116,7 +116,7 @@ async def delete_document(owner_id: UUID, document_id: UUID) -> bool:
         .eq("id", str(document_id))
         .execute()
     )
-    return True
+    return response.data
 
 
 async def begin_processing(owner_id: UUID, document_id: UUID) -> dict[str, Any]:
@@ -182,18 +182,19 @@ async def store_document_content(
     )
 
 
-async def stored_chunk_hashes(document_id: UUID) -> dict[int, str]:
+async def stored_chunk_hashes(document_id: UUID, retrieval_version: int = 1) -> dict[int, str]:
     client = await async_service_role_client()
     response = await (
         client.table("document_chunks")
-        .select("position,metadata_json")
+        .select("position,metadata_json,retrieval_version")
         .eq("document_id", str(document_id))
         .execute()
     )
     return {
         row["position"]: metadata["text_hash"]
         for row in response.data
-        if (metadata := row["metadata_json"]).get("embedding_model")
+        if row.get("retrieval_version", 1) == retrieval_version
+        and (metadata := row["metadata_json"]).get("embedding_model")
         == settings.ollama_embedding_model
         and metadata.get("text_hash")
     }
@@ -204,6 +205,7 @@ async def store_document_chunks(
     document_id: UUID,
     chunks: list[TextChunk],
     embeddings: list[list[float]],
+    retrieval_version: int = 1,
 ) -> None:
     if len(chunks) != len(embeddings):
         raise ValueError("every chunk must have an embedding")
@@ -213,6 +215,7 @@ async def store_document_chunks(
             {
                 "id": str(uuid4()),
                 "document_id": str(document_id),
+                "retrieval_version": retrieval_version,
                 "position": chunk.position,
                 "text": chunk.text,
                 "page_number": chunk.page_number,
@@ -228,7 +231,7 @@ async def store_document_chunks(
             }
             for chunk, embedding in zip(chunks, embeddings, strict=True)
         ],
-        on_conflict="document_id,position",
+        on_conflict="document_id,position,retrieval_version",
         returning=ReturnMethod.minimal,
     ).execute()
 

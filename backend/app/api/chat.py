@@ -9,8 +9,10 @@ from pydantic import BaseModel, Field, field_validator
 from app.auth.current_user import CurrentUser, current_user
 from app.chat.orchestrator import stream_turn
 from app.config import settings
+from app.database.activity import record_activity
 from app.database.base import MessageRole
 from app.database.chats import (
+    TurnInProgress,
     create_thread,
     delete_thread,
     list_messages,
@@ -154,11 +156,15 @@ async def stream_message(
     user: Annotated[CurrentUser, Depends(current_user)],
 ) -> StreamingResponse:
     request_id = uuid4()
-    user_message_id = await start_turn(
-        user, thread_id, body.content, request_id, body.document_ids
-    )
+    try:
+        user_message_id = await start_turn(
+            user, thread_id, body.content, request_id, body.document_ids
+        )
+    except TurnInProgress as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
     if user_message_id is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Thread not found")
+    await record_activity(user.id, "question_submitted", "Question submitted", thread_id)
     return StreamingResponse(
         stream_turn(
             request,

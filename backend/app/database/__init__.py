@@ -1,5 +1,6 @@
 """Database models and persistence helpers."""
 
+from app.database.activity_event import ActivityEvent
 from app.database.base import Base, DocumentStatus, MessageRole, SourceType
 from app.database.chat_message import ChatMessage
 from app.database.chat_thread import ChatThread
@@ -9,6 +10,7 @@ from app.database.source_document import SourceDocument
 from app.database.user import User
 
 __all__ = [
+    "ActivityEvent",
     "Base",
     "ChatMessage",
     "ChatThread",

@@ -1,7 +1,7 @@
 from datetime import date
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, model_validator
 
 INSUFFICIENT_EVIDENCE_MESSAGE = "Not enough evidence in the uploaded corpus to answer this question."
 
@@ -25,7 +25,7 @@ class SourcePassage(BaseModel):
 class Citation(BaseModel):
     chunk_id: UUID
     document_name: str = ""
-    excerpt: str = Field(min_length=1)
+    excerpt: str = ""
     page_numbers: tuple[int, ...] = ()
     section: str | None = None
     filing_type: str | None = None
@@ -35,7 +35,7 @@ class Citation(BaseModel):
 
 class GroundedAnswer(BaseModel):
     answer: str
-    citations: tuple[Citation, ...] = ()
+    citations: tuple[Citation, ...]
     insufficient_evidence: bool = False
 
     @model_validator(mode="after")
@@ -53,5 +53,6 @@ class GroundedAnswer(BaseModel):
 def insufficient_evidence_answer() -> GroundedAnswer:
     return GroundedAnswer(
         answer=INSUFFICIENT_EVIDENCE_MESSAGE,
+        citations=(),
         insufficient_evidence=True,
     )

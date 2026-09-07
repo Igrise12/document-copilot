@@ -10,7 +10,11 @@ class EmbeddingError(RuntimeError):
 
 
 def document_embedding_input(title: str, text: str) -> str:
-    return f"title: {title} | text: {text}"
+    prefix = f"title: {title} | text: "
+    maximum_text_bytes = settings.ollama_embedding_max_input_bytes - len(prefix.encode())
+    if maximum_text_bytes <= 0:
+        raise ValueError("document title exceeds the embedding input budget")
+    return prefix + text.encode()[:maximum_text_bytes].decode("utf-8", errors="ignore")
 
 
 def query_embedding_input(question: str) -> str:

@@ -89,11 +89,47 @@ def test_run_import_rejects_a_failed_pilot() -> None:
         create_chunker=lambda: None,
         service_role_client=FakeClient,
         get_owner_id=lambda *_: UUID("00000000-0000-0000-0000-000000000001"),
-        import_document=lambda *_: document,
+        import_document=lambda *_, **__: document,
         selected_filings=lambda *_: [{}],
         process_document=process,
         document_status=lambda *_: DocumentStatus.FAILED,
     )
 
     with pytest.raises(RuntimeError, match="did not reach uploaded"):
-        asyncio.run(importer["run_import"]("analyst@example.test", "accession", False, 1))
+        asyncio.run(
+            importer["run_import"]("analyst@example.test", "accession", False, 1, False, False)
+        )
+
+
+def test_run_import_processes_each_document_before_the_next_import() -> None:
+    importer = runpy.run_path(Path(__file__).parents[2] / "data/import_markdown_to_supabase.py")
+    globals_ = importer["run_import"].__globals__
+    first = importer["ImportedDocument"](
+        UUID("00000000-0000-0000-0000-000000000002"), is_ready=False
+    )
+    second = importer["ImportedDocument"](
+        UUID("00000000-0000-0000-0000-000000000003"), is_ready=False
+    )
+    events: list[str] = []
+
+    def import_document(*_, **__) -> object:
+        events.append("import")
+        return (first, second)[events.count("import") - 1]
+
+    async def process(*_, **__) -> None:
+        events.append("process")
+
+    globals_.update(
+        create_chunker=lambda: None,
+        service_role_client=FakeClient,
+        get_owner_id=lambda *_: UUID("00000000-0000-0000-0000-000000000001"),
+        import_document=import_document,
+        selected_filings=lambda *_: [{}, {}],
+        process_document=process,
+        document_status=lambda *_: DocumentStatus.READY,
+    )
+
+    assert asyncio.run(
+        importer["run_import"]("analyst@example.test", None, True, None, True, False)
+    ) == 2
+    assert events == ["import", "process", "import", "process"]

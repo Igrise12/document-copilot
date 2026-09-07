@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { DocumentsPage } from '@/pages/documents-page'
 import { ChatPage } from '@/pages/chat-page'
 import { LoginPage } from '@/pages/login-page'
+import { ActivityPage } from '@/pages/activity-page'
 
 function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined)
@@ -15,7 +16,7 @@ function App() {
     return () => listener.subscription.unsubscribe()
   }, [])
 
-  if (session === undefined) return <main className="loading-screen">Restoring your session…</main>
+  if (session === undefined) return <main className="loading-screen"><div className="session-loader"><span className="skeleton skeleton-logo" /><span className="skeleton skeleton-line" /></div></main>
 
   return (
     <BrowserRouter>
@@ -23,6 +24,7 @@ function App() {
         <Route path="/login" element={<LoginPage session={session} />} />
         <Route path="/documents" element={session ? <DocumentsPage session={session} /> : <Navigate replace to="/login" />} />
         <Route path="/chat" element={session ? <ChatPage session={session} /> : <Navigate replace to="/login" />} />
+        <Route path="/activity" element={session ? <ActivityPage session={session} /> : <Navigate replace to="/login" />} />
         <Route path="*" element={<Navigate replace to={session ? '/chat' : '/login'} />} />
       </Routes>
     </BrowserRouter>

@@ -99,8 +99,14 @@ async def test_authenticated_user_can_upload_a_pdf(authenticated_app, monkeypatc
     async def fake_process(id: str, owner_id: str) -> None:
         processed.append((id, owner_id))
 
+    recorded: list[tuple[str, str]] = []
+
+    async def fake_record(_owner_id: UUID, event_type: str, label: str, _resource_id: UUID) -> None:
+        recorded.append((event_type, label))
+
     monkeypatch.setattr("app.api.documents.create_document", fake_create)
     monkeypatch.setattr("app.api.documents.process_document", fake_process)
+    monkeypatch.setattr("app.api.documents.record_activity", fake_record)
 
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=authenticated_app), base_url="http://test"
@@ -114,6 +120,7 @@ async def test_authenticated_user_can_upload_a_pdf(authenticated_app, monkeypatc
     assert response.status_code == 202
     assert response.json() == {**document, "can_manage": True}
     assert processed == [(document_id, "00000000-0000-0000-0000-000000000001")]
+    assert recorded == [("document_uploaded", "company-10-k.pdf")]
 
 
 @pytest.mark.anyio
@@ -198,8 +205,12 @@ async def test_failed_document_can_be_retried(authenticated_app, monkeypatch) ->
     async def fake_process(id: str, owner_id: str) -> None:
         processed.append((id, owner_id))
 
+    async def fake_record(*_args) -> None:
+        return None
+
     monkeypatch.setattr("app.api.documents.retry_document", fake_retry)
     monkeypatch.setattr("app.api.documents.process_document", fake_process)
+    monkeypatch.setattr("app.api.documents.record_activity", fake_record)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=authenticated_app), base_url="http://test"
     ) as client:
@@ -232,11 +243,15 @@ async def test_retry_rejects_a_non_failed_document(authenticated_app, monkeypatc
 
 @pytest.mark.anyio
 async def test_owner_can_delete_a_document(authenticated_app, monkeypatch) -> None:
-    async def fake_delete(owner_id: UUID, document_id: UUID) -> bool:
+    async def fake_delete(owner_id: UUID, document_id: UUID) -> dict:
         assert owner_id == UUID("00000000-0000-0000-0000-000000000001")
-        return True
+        return {"original_filename": "company-10-k.pdf"}
+
+    async def fake_record(*_args) -> None:
+        return None
 
     monkeypatch.setattr("app.api.documents.delete_document", fake_delete)
+    monkeypatch.setattr("app.api.documents.record_activity", fake_record)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=authenticated_app), base_url="http://test"
     ) as client:

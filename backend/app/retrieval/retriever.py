@@ -10,12 +10,14 @@ from psycopg.rows import dict_row
 from app.config import settings
 from app.grounding.models import SourcePassage
 from app.ingestion.embeddings import embed_texts, query_embedding_input
+from app.ingestion.tables import compact_passage
 
 _SCOPE = """
     FROM document_chunks c
     JOIN source_documents d ON d.id = c.document_id
     WHERE d.status = 'ready'
       AND c.embedding IS NOT NULL
+      AND c.retrieval_version = d.retrieval_version
       AND (%(document_ids)s::uuid[] IS NULL OR c.document_id = ANY(%(document_ids)s))
 """
 
@@ -30,23 +32,40 @@ _LEXICAL_VECTOR = """
 """
 
 
+_FILLER = {
+    "how", "what", "which", "when", "where", "who", "did", "does", "do", "was", "were", "is", "are", "in", "on", "at", "for", "from", "to", "through", "and", "or", "of", "the", "a", "an", "with", "about", "explain", "compare", "comparing", "change", "changed", "changes", "mix", "other", "segment", "segments", "fiscal", "year", "years", "report", "reported", "much", "please", "happened", "financial", "follow", "up",
+}
+
+
+def contextual_question(question: str, history: Sequence[tuple[str, str]]) -> str:
+    if re.search(r"\b(what about|how about|same|that|those|their|it|they)\b|^and\b", question, re.IGNORECASE):
+        previous = next((text for role, text in reversed(history) if role == "user"), "")
+        if previous:
+            previous = re.sub(r"\b20\d{2}\b", "", previous)
+            return f"{previous.rstrip(' ?.')}. {question}"
+    return question
+
+
 def _lexical_query_variants(question: str) -> tuple[str, ...]:
-    if re.search(r"\brevenue\b", question, flags=re.IGNORECASE):
-        alternate = re.sub(
-            r"\brevenue\b", '"net sales"', question, flags=re.IGNORECASE
-        )
-        return question, alternate
-    if re.search(r"\btotal\s+net\s+sales\b", question, flags=re.IGNORECASE):
-        alternate = re.sub(
-            r"\btotal\s+net\s+sales\b", '"total revenue"', question, flags=re.IGNORECASE
-        )
-        return question, alternate
-    if re.search(r"\bnet\s+sales\b", question, flags=re.IGNORECASE):
-        alternate = re.sub(
-            r"\bnet\s+sales\b", '"total revenue"', question, flags=re.IGNORECASE
-        )
-        return question, alternate
-    return (question,)
+    tokens = re.findall(r"[a-zA-Z]+|20\d{2}", question.replace("’s", "").replace("'s", "").lower())
+    query = " ".join(dict.fromkeys(token for token in tokens if token not in _FILLER and not token.isdigit()))
+    if "margin" in query:
+        # A margin comparison needs both the numerator and denominator.
+        company = " ".join(token for token in query.split() if token not in {"operating", "margin", "margins", "aws"})
+        return f'{company} "operating income"', f'{company} "net sales"'
+    if re.search(r"\brevenue(?:s)?\b", query):
+        return query, re.sub(r"\brevenue(?:s)?\b", '"net sales"', query)
+    if "net sales" in query:
+        return query, query.replace("net sales", '"revenue"')
+    return (query,)
+
+
+def _requested_years(question: str) -> set[int]:
+    years = {int(year) for year in re.findall(r"\b20\d{2}\b", question)}
+    for first, last in re.findall(r"\b(20\d{2})\s*(?:-|–|—|to|through)\s*(20\d{2})\b", question):
+        years.update(range(int(first), int(last) + 1))
+    return years
+
 
 
 def reciprocal_rank_fusion(
@@ -72,7 +91,7 @@ def _passage(row: dict) -> SourcePassage:
         chunk_id=row["id"],
         document_id=row["document_id"],
         document_name=row["original_filename"],
-        text=row["text"],
+        text=compact_passage(row["text"]),
         page_numbers=page_numbers,
         section=row["section"],
         company_name=row.get("company_name"),
@@ -95,12 +114,49 @@ class DocumentRetriever:
         embedding = (await embed_texts([query_embedding_input(question)]))[0]
         async with await AsyncConnection.connect(str(settings.database_url)) as connection:
             await register_vector_async(connection)
-            semantic_ids = await self._semantic_search(connection, document_ids, embedding)
-            lexical_ids = await self._lexical_search(connection, document_ids, question)
-            chunk_ids = reciprocal_rank_fusion(semantic_ids, lexical_ids)[: settings.retrieval_result_limit]
+            scopes = await self._document_scopes(connection, question, document_ids)
+            ranked = []
+            for scope in scopes:
+                semantic_ids = await self._semantic_search(connection, scope, embedding)
+                lexical_ids = await self._lexical_search(connection, scope, question)
+                ranked.append(reciprocal_rank_fusion(semantic_ids, lexical_ids))
+            # Take a passage from each requested filing before taking a second one.
+            chunk_ids = []
+            for rank in range(settings.retrieval_result_limit):
+                for ids in ranked:
+                    if rank < len(ids) and ids[rank] not in chunk_ids:
+                        chunk_ids.append(ids[rank])
+            chunk_ids = chunk_ids[:settings.retrieval_result_limit]
             if not chunk_ids:
                 return []
             return await self._passages(connection, document_ids, chunk_ids)
+
+    async def _document_scopes(
+        self, connection: AsyncConnection, question: str, document_ids: tuple[UUID, ...] | None
+    ) -> list[tuple[UUID, ...] | None]:
+        async with connection.cursor(row_factory=dict_row) as cursor:
+            await cursor.execute(
+                """SELECT id, company_name, ticker, fiscal_year FROM source_documents
+                   WHERE status = 'ready'
+                     AND (%(document_ids)s::uuid[] IS NULL OR id = ANY(%(document_ids)s))
+                   ORDER BY fiscal_year DESC NULLS LAST, id""",
+                {"document_ids": list(document_ids) if document_ids is not None else None},
+            )
+            documents = await cursor.fetchall()
+        named = [d for d in documents if any(
+            name and re.search(r"\b" + re.escape(name) + r"\b", question, re.IGNORECASE)
+            for name in (d["company_name"], d["ticker"])
+        )]
+        if not named:
+            return [document_ids]
+        years = _requested_years(question)
+        if years:
+            chosen = [d for d in named if d["fiscal_year"] in years]
+        else:
+            # No year requested: use the latest filing per company, with comparative columns.
+            latest = {d["ticker"]: max(x["fiscal_year"] or 0 for x in named if x["ticker"] == d["ticker"]) for d in named}
+            chosen = [d for d in named if d["fiscal_year"] == latest[d["ticker"]]]
+        return [(d["id"],) for d in chosen] if chosen else [tuple(d["id"] for d in named)]
 
     async def read_passage(
         self, chunk_id: UUID, *, include_neighbors: bool = False
@@ -111,7 +167,7 @@ class DocumentRetriever:
         ):
                 await cursor.execute(
                     """
-                    SELECT c.id, c.document_id, c.position, c.text, c.page_number, c.section,
+                    SELECT c.id, c.document_id, c.position, c.retrieval_version, c.text, c.page_number, c.section,
                            c.metadata_json, d.original_filename, d.filing_type, d.filing_date,
                            d.fiscal_year, d.company_name, d.ticker, d.source_type
                     FROM document_chunks c
@@ -130,17 +186,19 @@ class DocumentRetriever:
                     """
                     SELECT text FROM document_chunks
                     WHERE document_id = %(document_id)s
+                      AND retrieval_version = %(retrieval_version)s
                       AND position IN (%(before)s, %(after)s)
                     ORDER BY position
                     """,
                     {
                         "document_id": row["document_id"],
+                        "retrieval_version": row["retrieval_version"],
                         "before": row["position"] - 1,
                         "after": row["position"] + 1,
                     },
                 )
                 neighbors = await cursor.fetchall()
-        return passage.model_copy(update={"neighboring_text": tuple(row["text"] for row in neighbors)})
+        return passage.model_copy(update={"neighboring_text": tuple(compact_passage(row["text"]) for row in neighbors)})
 
     async def _semantic_search(
         self,
@@ -183,7 +241,7 @@ class DocumentRetriever:
                 """,
                 {
                     "document_ids": list(document_ids) if document_ids is not None else None,
-                    "question": question,
+                    "question": query_variants[0],
                     "alternate_question": query_variants[-1],
                     "limit": settings.retrieval_lexical_candidate_limit,
                 },

@@ -82,8 +82,12 @@ async def test_stream_response_is_sse(authenticated_app, monkeypatch) -> None:
         yield "event: status\ndata: {\"phase\":\"persisted\"}\n\n"
         yield "event: complete\ndata: {}\n\n"
 
+    async def fake_record(*_args) -> None:
+        return None
+
     monkeypatch.setattr("app.api.chat.start_turn", fake_start)
     monkeypatch.setattr("app.api.chat.stream_turn", fake_stream)
+    monkeypatch.setattr("app.api.chat.record_activity", fake_record)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=authenticated_app), base_url="http://test") as client:
         response = await client.post(
             f"/threads/{THREAD_ID}/messages/stream", json={"content": "Question"}
@@ -91,6 +95,41 @@ async def test_stream_response_is_sse(authenticated_app, monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: complete" in response.text
+
+
+@pytest.mark.anyio
+async def test_stream_response_survives_activity_logging_failure(authenticated_app, monkeypatch) -> None:
+    async def fake_start(*args) -> UUID:
+        return UUID("00000000-0000-0000-0000-000000000003")
+
+    async def fake_stream(*args):
+        yield "event: complete\ndata: {}\n\n"
+
+    class FailingQuery:
+        def insert(self, _values):
+            return self
+
+        async def execute(self):
+            raise RuntimeError("activity database unavailable")
+
+    class FailingClient:
+        def table(self, table: str) -> FailingQuery:
+            assert table == "activity_events"
+            return FailingQuery()
+
+    async def fake_client() -> FailingClient:
+        return FailingClient()
+
+    monkeypatch.setattr("app.api.chat.start_turn", fake_start)
+    monkeypatch.setattr("app.api.chat.stream_turn", fake_stream)
+    monkeypatch.setattr("app.database.activity.async_service_role_client", fake_client)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=authenticated_app), base_url="http://test") as client:
+        response = await client.post(
+            f"/threads/{THREAD_ID}/messages/stream", json={"content": "Question"}
+        )
+
+    assert response.status_code == 200
     assert "event: complete" in response.text
 
 

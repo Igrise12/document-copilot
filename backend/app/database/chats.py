@@ -88,6 +88,22 @@ async def thread_exists(owner_id: UUID, thread_id: UUID) -> bool:
         return await cursor.fetchone() is not None
 
 
+
+class TurnInProgress(ValueError):
+    pass
+
+
+async def _expire_turns(cursor, owner_id: UUID, thread_id: UUID) -> None:
+    await cursor.execute(
+        """UPDATE chat_messages m
+           SET payload = m.payload || '{"state":"failed","error_code":"generation_timeout"}'::jsonb
+           FROM chat_threads t
+           WHERE m.thread_id=t.id AND t.id=%(thread_id)s AND t.owner_id=%(owner_id)s
+             AND m.role='user' AND m.payload->>'state'='running'
+             AND m.created_at < now() - %(seconds)s * interval '1 second'""",
+        {"owner_id": owner_id, "thread_id": thread_id, "seconds": settings.chat_turn_timeout_seconds + 30},
+    )
+
 async def list_messages(owner_id: UUID, thread_id: UUID) -> list[dict[str, Any]] | None:
     async with await _connection() as connection, connection.cursor() as cursor:
         await cursor.execute(
@@ -96,6 +112,7 @@ async def list_messages(owner_id: UUID, thread_id: UUID) -> list[dict[str, Any]]
         )
         if await cursor.fetchone() is None:
             return None
+        await _expire_turns(cursor, owner_id, thread_id)
         await cursor.execute(
             """
             SELECT m.id, m.role, m.content, m.payload, m.created_at FROM chat_messages m
@@ -204,6 +221,13 @@ async def start_turn(
                 {"thread_id": thread_id, "owner_id": user.id},
             )
             position = (await cursor.fetchone())["position"]
+            await _expire_turns(cursor, user.id, thread_id)
+            await cursor.execute(
+                "SELECT 1 FROM chat_messages WHERE thread_id=%s AND payload->>'state'='running' LIMIT 1",
+                (thread_id,),
+            )
+            if await cursor.fetchone():
+                raise TurnInProgress("This conversation already has a running answer")
             message_id = uuid4()
             await cursor.execute(
                 """
@@ -240,6 +264,7 @@ async def complete_turn(
                 JOIN chat_messages m ON m.thread_id = t.id
                 WHERE t.id = %(thread_id)s AND t.owner_id = %(owner_id)s
                   AND m.id = %(user_message_id)s AND m.role = 'user'
+                  AND m.payload->>'state' = 'running'
                 FOR UPDATE OF t, m
                 """,
                 {
@@ -324,6 +349,7 @@ async def finish_failed_turn(
     user_message_id: UUID,
     state: str,
     error_code: str,
+    metadata: dict[str, Any] | None = None,
 ) -> None:
     async with await _connection() as connection, connection.cursor() as cursor:
         await cursor.execute(
@@ -333,6 +359,7 @@ async def finish_failed_turn(
             FROM chat_threads t
             WHERE m.id = %(user_message_id)s AND m.thread_id = %(thread_id)s
               AND t.id = m.thread_id AND t.owner_id = %(owner_id)s
+              AND m.payload->>'state' = 'running'
             """,
             {
                 "user_message_id": user_message_id,
@@ -340,6 +367,7 @@ async def finish_failed_turn(
                 "owner_id": owner_id,
                 "payload": Jsonb(
                     {
+                        **(metadata or {}),
                         "state": state,
                         "error_code": error_code,
                         "completed_at": datetime.now(UTC).isoformat(),
